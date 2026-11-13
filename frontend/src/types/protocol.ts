@@ -78,6 +78,8 @@ export interface CrystalStatePayload {
 export interface Envelope<T extends string = string, P = unknown> {
   type: T;
   payload: P;
+  /** Phase D: echoed on every server message caused by the command that carried it. */
+  request_id?: string | null;
 }
 
 export type CrystalSystem =
@@ -202,6 +204,7 @@ export interface ClientCommandMap {
   START_MD: StartMDPayload;
   COMMITTEE_EVALUATE: CommitteeEvaluatePayload;
   PROTOTYPE_SEARCH: PrototypeSearchPayload; // Phase C2
+  REQUEST_HISTORY_ENTRY: { position: number }; // Phase D (instant) -> HISTORY_ENTRY
 }
 export type ClientCommand = keyof ClientCommandMap;
 
@@ -277,6 +280,7 @@ export interface EigenmodeData {
 
 export interface StreamStopped {
   stopped: ClientCommand | null;
+  history_pushed?: boolean; // Phase D: a HISTORY_STATE for the cancelled stream follows
 }
 
 // ---- Phase A events
@@ -417,6 +421,8 @@ export interface ErrorPayload {
   code: ErrorCode;
   message: string;
   command: ClientCommand | null;
+  history_pushed?: boolean; // Phase D: a HISTORY_STATE for the failed stream follows
+  after_terminal?: boolean; // Phase D: follows the stream's terminal frame (e.g. RELAXATION_DIVERGED)
 }
 
 export interface ServerEventMap {
@@ -446,6 +452,7 @@ export interface ServerEventMap {
   COMMITTEE_RESULT: CommitteeResult;
   GENERATION_CANDIDATES: GenerationCandidates; // Phase C2
   PROTOTYPE_CANDIDATES: PrototypeCandidates;
+  HISTORY_ENTRY: HistoryEntry; // Phase D
 }
 export type ServerEvent = keyof ServerEventMap;
 
@@ -467,6 +474,8 @@ export interface HealthResponse {
   dtype: string;
   load_error: string | null;
   hull_available: boolean;
+  max_atoms?: number | null; // Phase D
+  phonon_max_atoms?: number | null;
 }
 
 export type StabilityExpectation = "stable" | "unstable" | "unknown";
@@ -846,4 +855,11 @@ export interface MPMatchResponse {
   formula: string;
   n_searched: number;
   matches: MPMatch[];
+}
+
+// Phase D
+export interface HistoryEntry {
+  position: number;
+  label: string;
+  crystal: CrystalStatePayload;
 }

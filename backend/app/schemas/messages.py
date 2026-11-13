@@ -49,6 +49,8 @@ class ClientCommand(str, Enum):
     COMMITTEE_EVALUATE = "COMMITTEE_EVALUATE"               # streaming, not state-changing
     # Phase C2
     PROTOTYPE_SEARCH = "PROTOTYPE_SEARCH"                   # streaming, not state-changing
+    # Phase D
+    REQUEST_HISTORY_ENTRY = "REQUEST_HISTORY_ENTRY"         # instant, cancels nothing
 
 
 class ServerEvent(str, Enum):
@@ -80,11 +82,18 @@ class ServerEvent(str, Enum):
     # Phase C2
     GENERATION_CANDIDATES = "GENERATION_CANDIDATES"
     PROTOTYPE_CANDIDATES = "PROTOTYPE_CANDIDATES"
+    # Phase D
+    HISTORY_ENTRY = "HISTORY_ENTRY"
 
 
 class Envelope(BaseModel):
     type: str
     payload: Dict[str, Any] = Field(default_factory=dict)
+    # Phase D: optional client-chosen id (<= 64 chars). Every server message caused by that command
+    # (replies, stream frames, PROGRESS, terminal messages, the HISTORY_STATE it pushes, its ERROR,
+    # and the STREAM_STOPPED of its own cancellation) carries the same top-level "request_id".
+    # Messages with no originating request (e.g. the connect-time load) carry none.
+    request_id: Optional[str] = Field(default=None, max_length=64)
 
 
 # --------------------------------------------------------------------------- #
@@ -287,6 +296,7 @@ class EigenmodeData(BaseModel):
 
 class StreamStopped(BaseModel):
     stopped: Optional[str] = None           # command type that was cancelled
+    history_pushed: bool = False            # Phase D: a HISTORY_STATE for the cancelled stream follows
 
 
 # ---- Phase B commands -------------------------------------------------------
@@ -461,6 +471,9 @@ class ErrorPayload(BaseModel):
     code: str                               # an ErrorCode value
     message: str
     command: Optional[str] = None
+    history_pushed: bool = False            # Phase D: a HISTORY_STATE for the failed stream follows
+    after_terminal: bool = False            # Phase D: this ERROR follows the stream's terminal frame
+    #   (e.g. RELAXATION_DIVERGED after the final RELAXATION_FRAME): the stream is over either way
 
 
 # Global imaginary-mode tolerance (PROJECT_SPEC.md §4.4 step 5).
@@ -720,3 +733,19 @@ class PrototypeCandidates(BaseModel):
     n_sources: int
     candidates: List[PrototypeCandidate]     # sorted by e_hull_ev (then energy) when available
     method: str
+
+
+# =========================================================================== #
+# Phase D: protocol ergonomics
+# =========================================================================== #
+class RequestHistoryEntryPayload(BaseModel):
+    """Fetch the stored structure of a history entry without changing state -> HISTORY_ENTRY
+    (INDEX_OUT_OF_RANGE for an unknown position)."""
+
+    position: int = Field(ge=0)
+
+
+class HistoryEntry(BaseModel):
+    position: int
+    label: str
+    crystal: CrystalStatePayload            # the stored payload (model that produced it)

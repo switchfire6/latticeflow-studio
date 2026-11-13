@@ -20,6 +20,9 @@ class HealthResponse(BaseModel):
     dtype: str
     load_error: Optional[str] = None    # why MACE fell back, if it did
     hull_available: bool                # MP_API_KEY configured
+    # Phase D (§7.7): configurable size limits (LATTICEFLOW_MAX_ATOMS / LATTICEFLOW_PHONON_MAX_ATOMS)
+    max_atoms: Optional[int] = None
+    phonon_max_atoms: Optional[int] = None
 
 
 class ExportRequest(BaseModel):
