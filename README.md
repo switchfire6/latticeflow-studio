@@ -149,7 +149,7 @@ pip install -e clients/python
 pytest clients/python/tests -q
 ```
 
-**Validation sweep.** With the backend running, `python clients/python/examples/validation.py` runs the main workflows on Si, SrTiO₃, BaTiO₃ and NaCl and prints about 70 checks of two kinds:
+**Validation sweep.** With the backend running, `python clients/python/examples/validation.py` runs the main workflows on Si, SrTiO₃, BaTiO₃ and NaCl and prints about 60 checks of two kinds:
 
 - *Consistency* checks must pass with any model: the bulk modulus from the equation of state matches the elastic tensor, C_ij has the crystal's symmetry, the phonon DOS integrates to 3N, a supercell has the same energy per atom, and file export and import round-trip. A failure here is a bug.
 - *Reference* checks compare with experiment. With MACE-MP-0 small all consistency checks pass, and the reference checks that fall outside tolerance are the model softness described below (add `--model medium-mpa-0` to see the larger model).
