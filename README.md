@@ -34,6 +34,7 @@ Everything the UI does is also available from Python, so the studio can serve as
 | **Defects and disorder** | Supercells, vacancies, substitutions (single, all symmetry-equivalent sites, or a fraction with a configuration search), interstitials. Neutral defect formation energies across the chemical-potential limits. Ordered approximants of disordered CIFs. |
 | **How much do I trust the model?** | Model picker: MACE-MP-0 small / medium / large, MACE-MPA-0, MACE-OMAT-0, optional D3 dispersion. A model committee reports the spread of pressure, forces, volume and lattice across models. If MACE cannot load, a clear fallback watermark is shown. |
 | **New candidates** | A symmetric-candidate generator (space-group-conditioned Wyckoff search, top-k ranked candidates). Prototype substitution into Materials Project structures, ranked by ionic-substitution probability and E_hull. |
+| **Keep and batch the work** | A project library (SQLite, under `LATTICEFLOW_DATA_DIR`): structures with their lineage and every result keyed by model and settings, reopened without recomputing, exported as one project file. A background job queue runs chains such as relax → phonons → elastic → hull (optionally following an instability) over many structures, giving way to interactive calculations. A results table and scatter plot, phase diagrams, dispersion overlays against a parent, and a "Copy methods text" paragraph for papers. |
 
 Every committed change goes into the undo/redo history (50 entries), and the session is restored after a reconnect.
 
