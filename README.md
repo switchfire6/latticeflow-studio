@@ -19,6 +19,7 @@ Everything the UI does is also available from Python, so the studio can serve as
 - [Scientific scope and limits](#scientific-scope-and-limits)
 - [Project layout](#project-layout)
 - [Acknowledgements](#acknowledgements)
+- [License](#license)
 
 ## What you can do
 
@@ -185,3 +186,7 @@ LatticeFlow Studio is a front end to other people's science. If you publish resu
 - [ASE](https://wiki.fysik.dtu.dk/ase/) (optimisers, MD) and [pymatgen](https://pymatgen.org/) (structure matching, diffraction, elasticity, bond valence).
 - [The Materials Project](https://materialsproject.org/) (reference structures) and [PyXtal](https://github.com/MaterSim/PyXtal) (Wyckoff tables).
 - [torch-dftd](https://github.com/pfnet-research/torch-dftd) (D3 dispersion).
+
+## License
+
+[MIT](LICENSE). The libraries and model checkpoints the studio uses have their own licences.
