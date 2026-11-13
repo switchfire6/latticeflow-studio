@@ -5,7 +5,9 @@
  * graceful HULL_UNAVAILABLE handling. `HullPopoverView` is pure (unit-tested
  * with server rendering).
  */
-import { Calculator, Loader2, X } from "lucide-react";
+import { Calculator, Loader2, Triangle, X } from "lucide-react";
+import { showPane } from "../../services/dockActions";
+import { FromLibraryBadgeView } from "./LibraryPanes";
 import { useEffect, useState } from "react";
 import { evaluateHull } from "../../services/hullActions";
 import { useCrystalStore, type HullState } from "../../store/useCrystalStore";
@@ -59,7 +61,10 @@ export function HullPopoverView({
             </span>
           </div>
           {stale && <p className="text-xs text-warn/80">The structure changed since this evaluation; re-run for the current one.</p>}
-          <FallbackTag />
+          <span className="flex items-center gap-1.5">
+            <FallbackTag />
+            <FromLibraryBadgeView kind="hull" data={hull.result} />
+          </span>
           {hull.result.candidate_relaxed !== undefined && (
             <div className="flex items-baseline justify-between font-mono text-xs" data-hull-relaxed>
               <span className={hull.result.candidate_relaxed ? "text-ok/90" : "text-warn/90"}>
@@ -86,6 +91,11 @@ export function HullPopoverView({
             {hull.result.references.length} reference phase{hull.result.references.length === 1 ? "" : "s"} · {hull.result.umlip_backend}
             {hull.result.formation_energy_per_atom != null && ` · E_form ${hull.result.formation_energy_per_atom.toFixed(3)} eV/atom`}
           </div>
+          {hull.result.phase_diagram && (
+            <Button variant="subtle" className="w-full justify-start px-1.5 py-1 font-sans text-xs" onClick={() => showPane("phase")} data-show-phase>
+              <Triangle size={11} /> Show the {hull.result.phase_diagram.elements.length === 3 ? "ternary" : hull.result.phase_diagram.elements.length === 2 ? "binary" : ""} phase diagram
+            </Button>
+          )}
           <p className="text-xs leading-snug text-fg-4">
             {hull.result.method}
             {hull.result.candidate_relaxed && !/relax/i.test(hull.result.method) ? " · candidate relaxed (FIRE + cell) before scoring" : ""}

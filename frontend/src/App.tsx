@@ -19,6 +19,9 @@ import { DisplayPanel, EigenmodePill, FollowBanner, StreamProgress, ToolModeBar 
 import { api } from "./services/apiClient";
 import { commands, sessionMemory, studio } from "./services/wsClient";
 import { useCrystalStore } from "./store/useCrystalStore";
+import { JobDrawer } from "./components/hud/JobDrawer";
+import { installLibrary, refreshProjects, refreshStructures } from "./services/libraryActions";
+import { useJobPolling } from "./services/jobActions";
 import { shortcutFor } from "./utils/shortcuts";
 
 const HEALTH_POLL_MS = 15_000;
@@ -92,8 +95,21 @@ function useBackend() {
   }, []);
 }
 
+/** Project library: socket hooks for auto-save, then the project list (retried with the health poll). */
+function useLibraryBootstrap() {
+  const healthy = useCrystalStore((s) => s.health !== null);
+  useEffect(() => {
+    installLibrary();
+  }, []);
+  useEffect(() => {
+    if (healthy) void refreshProjects().then(() => refreshStructures());
+  }, [healthy]);
+  useJobPolling();
+}
+
 export function App() {
   useBackend();
+  useLibraryBootstrap();
   useLocalAnalysisAutoRefresh();
   useShortcuts();
   const CrystalCanvas = useCrystalCanvas();
@@ -142,6 +158,7 @@ export function App() {
         </ViewportDropZone>
       </div>
       <BottomDock />
+      <JobDrawer />
     </div>
   );
 }

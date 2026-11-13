@@ -25,6 +25,7 @@ import { PeriodicTablePicker } from "./PeriodicTablePicker";
 import { StructureActions } from "./StructureActions";
 import { StructurePanel } from "./StructurePanel";
 import { HistoryPanel } from "./HistoryPanel";
+import { LibraryPanel } from "./LibraryPanel";
 import { DefectsCard } from "./PhaseCDialogs";
 import { GenerationCandidatesList } from "./PhaseC2Dialogs";
 import { useUi } from "../../store/uiStore";
@@ -181,6 +182,7 @@ export function GeneratorSidebar() {
     <aside className="flex w-[320px] shrink-0 flex-col border-r border-line-soft bg-surface">
       <div className="flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto p-3">
         <LoadCard />
+        <LibraryPanel />
         <StructurePanel />
         <HistoryPanel />
         <DefectsCard />

@@ -28,6 +28,8 @@ export function availablePanes(s: {
   if (s.diffraction || s.diffractionPending || opened.includes("xrd")) out.push("xrd");
   if (s.localAnalysis || opened.includes("local")) out.push("local");
   if ((s.mdVersion ?? 0) > 0 || s.streams.some((x) => x.kind === "md") || opened.includes("md")) out.push("md");
+  if (opened.includes("phase")) out.push("phase");
+  if (opened.includes("results")) out.push("results");
   return out;
 }
 

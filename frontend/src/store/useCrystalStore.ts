@@ -202,10 +202,10 @@ export type HullState =
   | { status: "unavailable"; message: string; stateVersion: number }
   | { status: "error"; code: string; message: string; stateVersion: number };
 
-export type DockPane = "dispersion" | "dos" | "rdf" | "relaxation" | "eos" | "elastic" | "xrd" | "local" | "md";
-export const DOCK_PANES: readonly DockPane[] = ["dispersion", "dos", "rdf", "relaxation", "eos", "elastic", "xrd", "local", "md"];
+export type DockPane = "dispersion" | "dos" | "rdf" | "relaxation" | "eos" | "elastic" | "xrd" | "local" | "md" | "phase" | "results";
+export const DOCK_PANES: readonly DockPane[] = ["dispersion", "dos", "rdf", "relaxation", "eos", "elastic", "xrd", "local", "md", "phase", "results"];
 /** Panes that appear only once requested (button / dock toggle) or when they hold a result. */
-export const ON_DEMAND_PANES: readonly DockPane[] = ["elastic", "xrd", "local", "md"];
+export const ON_DEMAND_PANES: readonly DockPane[] = ["elastic", "xrd", "local", "md", "phase", "results"];
 export interface DockState {
   open: boolean;
   height: number;
@@ -217,7 +217,7 @@ export const DEFAULT_DOCK: DockState = {
   height: 300,
   // The DOS pane is offered (toggle + "DOS & thermo" button) but not forced into the layout.
   hidden: ["dos"],
-  weights: { dispersion: 1.7, dos: 1.5, rdf: 1, relaxation: 1.2, eos: 1.4, elastic: 1.5, xrd: 1.7, local: 1.8, md: 1.9 },
+  weights: { dispersion: 1.7, dos: 1.5, rdf: 1, relaxation: 1.2, eos: 1.4, elastic: 1.5, xrd: 1.7, local: 1.8, md: 1.9, phase: 1.3, results: 2.4 },
 };
 
 /** Merge a stored dock layout over the defaults (older layouts lack the Phase A panes). */

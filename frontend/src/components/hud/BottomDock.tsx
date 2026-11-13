@@ -29,6 +29,7 @@ import { ElasticPane } from "./ElasticPane";
 import { EosPane } from "./EosPane";
 import { LocalStructurePane } from "./LocalStructurePane";
 import { MdPane } from "./MdPane";
+import { FromLibraryBadge, PhasePane, PhononCompareControl, ResultsPane } from "./LibraryPanes";
 import { ExportMenu, usePaneExportItems, type ExportItem } from "./ExportMenu";
 import { PhononControlBar } from "./PhononControlBar";
 import { PhononInfoStrip } from "./PhononInfoStrip";
@@ -44,6 +45,8 @@ const TITLES: Record<DockPane, string> = {
   xrd: "Powder diffraction",
   local: "Local structure",
   md: "Molecular dynamics",
+  phase: "Phase diagram",
+  results: "Project results",
 };
 const TOGGLE_LABELS: Record<DockPane, string> = {
   dispersion: "dispersion",
@@ -55,9 +58,11 @@ const TOGGLE_LABELS: Record<DockPane, string> = {
   xrd: "XRD",
   local: "local",
   md: "MD",
+  phase: "phase diagram",
+  results: "results",
 };
 /** Panes whose numbers come from the uMLIP and get the fallback watermark. */
-const MODEL_PANES: ReadonlySet<DockPane> = new Set<DockPane>(["dispersion", "dos", "eos", "elastic", "md"]);
+const MODEL_PANES: ReadonlySet<DockPane> = new Set<DockPane>(["dispersion", "dos", "eos", "elastic", "md", "phase"]);
 
 function PaneExport({ pane, bodyRef }: { pane: DockPane; bodyRef: React.RefObject<HTMLDivElement | null> }) {
   const exportPending = useCrystalStore((s) => s.phononExportPending);
@@ -107,7 +112,11 @@ function Pane({ pane, weight, children, onHide }: { pane: DockPane; weight: numb
     <div className="flex min-w-0 flex-col rounded-panel border border-line bg-surface" style={{ flex: `${weight} 1 0` }} data-pane={pane}>
       <div className="flex h-7 shrink-0 items-center gap-2 px-2.5">
         <span className="shrink-0 text-xs font-semibold text-fg-2">{TITLES[pane]}</span>
-        <span className="min-w-0 flex-1 truncate">{pane === "relaxation" && <RelaxationHeader />}</span>
+        <span className="min-w-0 flex-1 truncate">
+          {pane === "relaxation" && <RelaxationHeader />}
+          {pane === "dispersion" && <PhononCompareControl />}
+        </span>
+        <FromLibraryBadge pane={pane} />
         {MODEL_PANES.has(pane) && <FallbackTag />}
         <PaneExport pane={pane} bodyRef={bodyRef} />
         <button type="button" title="Hide pane" className="text-fg-5 hover:text-fg-2" onClick={onHide}>
@@ -241,6 +250,10 @@ export function BottomDock() {
                   <LocalStructurePane />
                 ) : p === "md" ? (
                   <MdPane />
+                ) : p === "phase" ? (
+                  <PhasePane />
+                ) : p === "results" ? (
+                  <ResultsPane />
                 ) : (
                   <RelaxationCurve />
                 )}

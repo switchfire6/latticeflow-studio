@@ -5,6 +5,7 @@
 import { diffractionRequest, useSettings, type DiffractionSettings } from "../store/settings";
 import { useCrystalStore, type CrystalStore } from "../store/useCrystalStore";
 import { ApiError, api, type ApiClient } from "./apiClient";
+import { emitResult } from "./resultEvents";
 
 export function diffractionErrorText(err: unknown): string {
   if (err instanceof ApiError) return `${err.code}: ${err.message}`;
@@ -22,8 +23,11 @@ export async function computeDiffraction(
   const stateVersion = st.frame.stateVersion;
   st.setDiffractionPending(true, null);
   try {
-    const result = await client.diffraction({ crystal, ...diffractionRequest(settings) });
+    const request = diffractionRequest(settings);
+    const result = await client.diffraction({ crystal, ...request });
     store.getState().setDiffraction({ result, stateVersion });
+    const m = st.model;
+    emitResult({ kind: "diffraction", data: result, settings: { ...request }, crystal, stateVersion, modelId: m?.model_id ?? null, dispersion: m?.dispersion ?? false });
     store.getState().setDiffractionPending(false, null);
     return true;
   } catch (err) {

@@ -7,6 +7,7 @@
  */
 import { useCrystalStore, type CrystalStore, type HullState } from "../store/useCrystalStore";
 import { ApiError, api, type ApiClient } from "./apiClient";
+import { emitResult } from "./resultEvents";
 
 export const HULL_NO_KEY_HINT = "Set MP_API_KEY on the backend to enable convex-hull lookups.";
 
@@ -38,6 +39,7 @@ export async function evaluateHull(store: CrystalStore = useCrystalStore, client
     const m = st.model;
     const result = await client.hullEvaluate(crystal, undefined, true, m ? { model_id: m.model_id, dispersion: m.dispersion } : null);
     next = { status: "ok", result, stateVersion };
+    emitResult({ kind: "hull", data: result, settings: { relax: true }, crystal, stateVersion, modelId: m?.model_id ?? null, dispersion: m?.dispersion ?? false });
   } catch (err) {
     next = hullFailureState(err, stateVersion);
   }

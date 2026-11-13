@@ -8,8 +8,10 @@ import type {
   DiffractionResponse,
   ElasticTensorResult,
   PhononAnalysisComplete,
+  PhaseDiagramData,
   PhononDosData,
 } from "../types/protocol";
+import { columnTitle, type ColumnDef, type TableRow } from "./library";
 import { connectedFrequencies, formatKLabel } from "./bandChart";
 import { frequencyFactor, frequencyUnitLabel, type FrequencyUnit } from "./units";
 
@@ -125,4 +127,23 @@ export function elasticCsv(r: ElasticTensorResult, comments: string[] = []): str
 export function fileStem(formula: string | null | undefined, what: string): string {
   const f = (formula || "structure").replace(/[^A-Za-z0-9_-]+/g, "");
   return `${f || "structure"}_${what}`;
+}
+
+/** Results table of a project: one row per structure, the visible columns (raw values, units in the header). */
+export function resultsTableCsv(rows: readonly TableRow[], cols: readonly ColumnDef[], comments: string[] = []): string {
+  return toCsv(
+    ["structure_id", ...cols.map(columnTitle)],
+    rows.map((r) => [r.id, ...cols.map((c) => { const v = r.values[c.key]; return typeof v === "boolean" ? String(v) : v; })]),
+    comments,
+  );
+}
+
+/** Phase-diagram points (protocol §8): the reference phases, then the evaluated structure. */
+export function phaseDiagramCsv(pd: PhaseDiagramData, comments: string[] = []): string {
+  const pts = [...pd.entries.map((e) => ({ ...e, role: "reference" })), { ...pd.candidate, role: "candidate" }];
+  return toCsv(
+    ["role", "material_id", "formula", ...pd.elements.map((e) => `x_${e}`), "formation_energy_eV_per_atom", "e_above_hull_eV_per_atom", "on_hull"],
+    pts.map((p) => [p.role, p.material_id ?? "", p.formula, ...pd.elements.map((e) => p.composition[e] ?? 0), p.formation_energy_per_atom, p.e_above_hull, String(p.on_hull)]),
+    [...comments, `phase diagram ${pd.elements.join("-")}; hull facets ${pd.facets.map((f) => f.join("-")).join(" ")}`],
+  );
 }

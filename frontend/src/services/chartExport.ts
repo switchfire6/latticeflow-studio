@@ -12,7 +12,9 @@ import {
   elasticCsv,
   eosCsv,
   fileStem,
+  phaseDiagramCsv,
   rdfCsv,
+  resultsTableCsv,
   relaxationCsv,
   thermalCsv,
   toCsv,
@@ -22,6 +24,8 @@ import { activeModel, modelBadgeText } from "../utils/models";
 import { compositeCharts, type RenderedChart } from "../utils/pngExport";
 import { chartRenderer } from "../components/charts/useCanvasChart";
 import type { FrequencyUnit } from "../utils/units";
+import { useLibrary } from "../store/libraryStore";
+import { flattenRows, sortRows, visibleColumns } from "../utils/library";
 
 export interface CsvFile {
   label: string;
@@ -93,6 +97,25 @@ export function paneCsvFiles(pane: DockPane, st: CrystalStoreState, unit: Freque
         });
       }
       return out;
+    }
+    case "phase": {
+      const pd = st.hull.status === "ok" ? st.hull.result.phase_diagram : null;
+      return pd ? [{ label: "CSV · phases", filename: `${fileStem(f, "phase_diagram")}.csv`, build: () => phaseDiagramCsv(pd, head) }] : [];
+    }
+    case "results": {
+      const lib = useLibrary.getState();
+      const project = lib.projects.find((p) => p.id === lib.activeProjectId);
+      if (!lib.structures.length) return [];
+      return [
+        {
+          label: "CSV · results table",
+          filename: `${fileStem(project?.name, "results")}.csv`,
+          build: () => {
+            const rows = sortRows(flattenRows(lib.structures), "name", "asc");
+            return resultsTableCsv(rows, visibleColumns(rows), [`project ${project?.name ?? ""}`, "newest result of each kind per structure; LatticeFlow Studio"]);
+          },
+        },
+      ];
     }
     case "md": {
       const md = st.session.md;

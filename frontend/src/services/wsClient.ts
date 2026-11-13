@@ -540,6 +540,11 @@ export function dispatchServerMessage(store: CrystalStore, msg: ServerMessage): 
 // --------------------------------------------------------------------------- //
 // Socket
 // --------------------------------------------------------------------------- //
+/** The client's stream FIFO as it was just before a server message was dispatched. */
+export interface MessageContext {
+  streams: { id: number; command: StreamCommand; stopping: boolean }[];
+}
+
 export interface WebSocketLike {
   readonly readyState: number;
   onopen: ((ev: unknown) => void) | null;
@@ -614,14 +619,21 @@ export class StudioClient {
   }
 
   private chain: RelaxChain | null = null;
-  private listeners = new Set<(msg: ServerMessage) => void>();
+  private listeners = new Set<(msg: ServerMessage, ctx: MessageContext) => void>();
+  private sendListeners = new Set<(type: ClientCommand, payload: unknown, streamId: number | null) => void>();
   /** Phase C1: re-send the remembered model once the (restored) structure has loaded. */
   private modelRestorePending = false;
 
   /** Observe every server message after it was dispatched (e.g. the Arrhenius scan). Returns an unsubscribe. */
-  addListener(fn: (msg: ServerMessage) => void): () => void {
+  addListener(fn: (msg: ServerMessage, ctx: MessageContext) => void): () => void {
     this.listeners.add(fn);
     return () => this.listeners.delete(fn);
+  }
+
+  /** Observe every command actually sent (with the stream id it registered, if streaming). Returns an unsubscribe. */
+  addSendListener(fn: (type: ClientCommand, payload: unknown, streamId: number | null) => void): () => void {
+    this.sendListeners.add(fn);
+    return () => this.sendListeners.delete(fn);
   }
 
   /** The label of the command waiting for the current relaxation (null = none). */
@@ -761,6 +773,7 @@ export class StudioClient {
       }
     }
 
+    const ctx: MessageContext = { streams: this.store.getState().session.streams.map((x) => ({ id: x.id, command: x.command, stopping: x.stopping })) };
     const chain = this.chain;
     const chainTracked = !!chain && this.store.getState().session.streams.some((x) => x.id === chain.streamId);
 
@@ -795,7 +808,7 @@ export class StudioClient {
       this.restoreModel();
     }
 
-    for (const fn of this.listeners) fn(msg);
+    for (const fn of this.listeners) fn(msg, ctx);
   }
 
   /** SET_MODEL for the remembered model unless it is what a fresh session runs anyway. */
@@ -851,6 +864,7 @@ export class StudioClient {
     }
     if (type === "START_FLOW_GENERATION") st.setGenerationCandidates(null);
     if (type === "PROTOTYPE_SEARCH") st.setPrototypeSearch({ status: "running", result: null, error: null });
+    let streamId: number | null = null;
     if (type === "STOP_STREAM") st.markStopping();
     else if (isStreamingSend(type, payload)) {
       st.beginStream(type as StreamCommand);
@@ -862,7 +876,9 @@ export class StudioClient {
         st.session.phononSupercell = p.supercell_dim ?? [2, 2, 2];
         st.session.phononMinLength = p.min_supercell_length ?? null;
       }
+      streamId = st.session.streams.at(-1)?.id ?? null;
     }
+    for (const fn of this.sendListeners) fn(type, payload, streamId);
     return true;
   }
 }

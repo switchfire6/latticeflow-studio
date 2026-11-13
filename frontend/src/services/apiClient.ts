@@ -23,6 +23,20 @@ import type {
   OrderingResponse,
   PresetInfo,
 } from "../types/protocol";
+import type {
+  Job,
+  JobCreate,
+  JobList,
+  Project,
+  ProjectBundle,
+  Result,
+  ResultCreate,
+  ResultKind,
+  ResultRow,
+  Structure,
+  StructureCreate,
+  StructureListRow,
+} from "../types/library";
 
 /** The session's model for model-dependent REST calls (hull); null = process default. */
 export interface ModelSelection {
@@ -92,6 +106,18 @@ export function createApiClient(opts: ApiClientOptions = {}) {
     return (await res.json()) as T;
   }
 
+  /** JSON request with any method; 204 answers resolve to undefined. */
+  async function sendJson<T>(method: string, path: string, body?: unknown): Promise<T> {
+    const res = await f(`${base()}${path}`, {
+      method,
+      headers: body === undefined ? { Accept: "application/json" } : { "Content-Type": "application/json", Accept: "application/json" },
+      body: body === undefined ? undefined : JSON.stringify(body),
+    });
+    if (!res.ok) throw await toApiError(res);
+    if (res.status === 204) return undefined as T;
+    return (await res.json()) as T;
+  }
+
   return {
     health: (signal?: AbortSignal) => getJson<HealthResponse>("/health", signal),
     presets: (signal?: AbortSignal) => getJson<PresetInfo[]>("/presets", signal),
@@ -119,6 +145,39 @@ export function createApiClient(opts: ApiClientOptions = {}) {
     compare: (body: CompareRequest, signal?: AbortSignal) => postJson<CompareResponse>("/compare", body, signal),
     /** Materials Project entries matching a structure (POST /api/mp/match). */
     mpMatch: (body: MPMatchRequest, signal?: AbortSignal) => postJson<MPMatchResponse>("/mp/match", body, signal),
+
+    // ---- Project library (protocol §6)
+    projects: () => getJson<Project[]>("/projects"),
+    createProject: (name: string) => sendJson<Project>("POST", "/projects", { name }),
+    renameProject: (pid: number, name: string) => sendJson<Project>("PATCH", `/projects/${pid}`, { name }),
+    deleteProject: (pid: number) => sendJson<void>("DELETE", `/projects/${pid}`),
+    exportProject: (pid: number) => getJson<ProjectBundle>(`/projects/${pid}/export`),
+    importProject: (bundle: unknown, name?: string) =>
+      sendJson<Project>("POST", `/projects/import${name ? `?name=${encodeURIComponent(name)}` : ""}`, bundle),
+    structures: (pid: number) => getJson<StructureListRow[]>(`/projects/${pid}/structures`),
+    /** 201 new, or 200 with `existing: true` when the project already holds the structure (dedup). */
+    addStructure: (pid: number, body: StructureCreate) => sendJson<Structure>("POST", `/projects/${pid}/structures`, body),
+    structure: (sid: number) => getJson<Structure>(`/structures/${sid}`),
+    updateStructure: (sid: number, body: { name?: string; notes?: string }) => sendJson<Structure>("PATCH", `/structures/${sid}`, body),
+    deleteStructure: (sid: number) => sendJson<void>("DELETE", `/structures/${sid}`),
+    addResult: (sid: number, body: ResultCreate) => sendJson<ResultRow>("POST", `/structures/${sid}/results`, body),
+    results: (sid: number, kind?: ResultKind) => getJson<ResultRow[]>(`/structures/${sid}/results${kind ? `?kind=${kind}` : ""}`),
+    result: <T = unknown>(rid: number) => getJson<Result<T>>(`/results/${rid}`),
+
+    // ---- Job queue (protocol §7)
+    jobs: (projectId?: number, active?: boolean, signal?: AbortSignal) => {
+      const q = new URLSearchParams();
+      if (projectId !== undefined) q.set("project_id", String(projectId));
+      if (active !== undefined) q.set("active", String(active));
+      const qs = q.toString();
+      return getJson<JobList>(`/jobs${qs ? `?${qs}` : ""}`, signal);
+    },
+    createJobs: (body: JobCreate) => sendJson<Job[]>("POST", "/jobs", body),
+    cancelJob: (id: number) => sendJson<Job>("POST", `/jobs/${id}/cancel`),
+    moveJob: (id: number, position: number) => sendJson<Job>("POST", `/jobs/${id}/move`, { position }),
+    deleteJob: (id: number) => sendJson<void>("DELETE", `/jobs/${id}`),
+    clearFinishedJobs: (projectId?: number) =>
+      sendJson<{ deleted: number }>("POST", `/jobs/clear-finished${projectId !== undefined ? `?project_id=${projectId}` : ""}`),
 
     /** POST /api/export/cif -> { blob, filename } (filename from Content-Disposition). */
     async exportStructure(crystal: CrystalStatePayload, format: ExportFormat | ExportOptions = "cif", signal?: AbortSignal) {

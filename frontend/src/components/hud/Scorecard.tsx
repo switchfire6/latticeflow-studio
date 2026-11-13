@@ -6,8 +6,9 @@
  * ("Cell under +5.10 GPa — relax first?") and offers Relax-then-run.
  * Status logic: utils/scorecard.ts (pure, tested); `ScorecardView` is pure.
  */
-import { Check, ChevronDown, ChevronRight, CircleDashed, Clock, Loader2, Minus, Play, ShieldQuestion, Square, X } from "lucide-react";
-import { useState } from "react";
+import { Check, ChevronDown, ChevronRight, CircleDashed, ClipboardCopy, Clock, Loader2, Minus, Play, ShieldQuestion, Square, X } from "lucide-react";
+import { useState, type ReactNode } from "react";
+import { copyMethodsText } from "../../services/libraryActions";
 import { showPane } from "../../services/dockActions";
 import { evaluateHull } from "../../services/hullActions";
 import { commands } from "../../services/wsClient";
@@ -66,6 +67,8 @@ export interface ScorecardViewProps {
   /** Phase C1: committee result for this structure (optional "Model agreement" line). */
   agreement?: { agree: boolean; text: string; stale: boolean } | null;
   onAgreement?(): void;
+  /** Extra row under the checks (the methods-text button). */
+  footer?: ReactNode;
 }
 
 export function ScorecardView(p: ScorecardViewProps) {
@@ -166,6 +169,7 @@ export function ScorecardView(p: ScorecardViewProps) {
               </span>
             </button>
           )}
+          {p.footer}
         </div>
       )}
     </Panel>
@@ -233,6 +237,18 @@ export function Scorecard() {
       confirming={confirming}
       agreement={agreement}
       onAgreement={() => useUi.getState().openDialog("committee")}
+      footer={
+        <button
+          type="button"
+          onClick={() => void copyMethodsText()}
+          disabled={!crystal}
+          className="flex w-full items-center gap-1.5 pt-1.5 text-left text-2xs text-fg-3 hover:text-fg disabled:opacity-30"
+          title="Copy a methods paragraph built from the settings and model of the results shown, with citations"
+          data-copy-methods
+        >
+          <ClipboardCopy size={11} /> Copy methods text
+        </button>
+      }
       onToggle={() => useSettings.getState().setCollapsed("scorecard", !collapsed)}
       onRun={(id) => {
         const c = checks.find((x) => x.id === id)!;

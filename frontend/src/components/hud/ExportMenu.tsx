@@ -7,6 +7,7 @@ import { Download } from "lucide-react";
 import { useEffect, useRef, useState, type RefObject } from "react";
 import { currentFrequencyUnit, downloadCsv, exportPanePng, paneCsvFiles, pngFilename } from "../../services/chartExport";
 import { useCrystalStore, type DockPane } from "../../store/useCrystalStore";
+import { useLibrary } from "../../store/libraryStore";
 import { cx } from "./ui";
 
 export interface ExportItem {
@@ -67,8 +68,9 @@ export function ExportMenu({ items, title = "Export" }: { items: ExportItem[]; t
 /** Standard items for a pane: its CSV files, PNG and publication PNG of its canvases. */
 export function usePaneExportItems(pane: DockPane, bodyRef: RefObject<HTMLElement | null>, extra: ExportItem[] = []): ExportItem[] {
   // Re-render when the pane's data changes so the menu enables / disables correctly.
+  useLibrary((s) => (pane === "results" ? s.structures : null));
   useCrystalStore((s) =>
-    pane === "dispersion" ? s.phonon : pane === "dos" ? s.dos : pane === "eos" ? s.eos : pane === "xrd" ? s.diffraction : pane === "elastic" ? s.elastic : pane === "relaxation" ? s.relaxHistory : pane === "local" ? s.localAnalysis : pane === "md" ? s.mdVersion : s.structureVersion,
+    pane === "phase" ? s.hull : pane === "dispersion" ? s.phonon : pane === "dos" ? s.dos : pane === "eos" ? s.eos : pane === "xrd" ? s.diffraction : pane === "elastic" ? s.elastic : pane === "relaxation" ? s.relaxHistory : pane === "local" ? s.localAnalysis : pane === "md" ? s.mdVersion : s.structureVersion,
   );
   const st = useCrystalStore.getState();
   const files = paneCsvFiles(pane, st, currentFrequencyUnit());

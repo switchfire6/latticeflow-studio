@@ -528,6 +528,26 @@ export interface HullEvaluateResponse {
   umlip_backend: string;
   candidate_relaxed?: boolean;
   energy_per_atom_as_given?: number | null;
+  /** Phase-diagram plot data (protocol §8). */
+  phase_diagram?: PhaseDiagramData | null;
+}
+
+/** protocol §8: one point of the formation-energy phase diagram. */
+export interface PhaseDiagramPoint {
+  material_id: string | null; // null for the candidate
+  formula: string;
+  /** element -> atom fraction for every element of `elements` (sums to 1). */
+  composition: Record<string, number>;
+  formation_energy_per_atom: number;
+  e_above_hull: number;
+  on_hull: boolean;
+}
+export interface PhaseDiagramData {
+  elements: string[]; // alphabetical
+  entries: PhaseDiagramPoint[];
+  candidate: PhaseDiagramPoint;
+  /** Hull simplices as indices into `entries` (pairs for a binary, triples for a ternary). */
+  facets: number[][];
 }
 
 export interface ErrorResponse {

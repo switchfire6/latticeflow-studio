@@ -18,6 +18,7 @@ import { relaxationVerdict, type RelaxationVerdict } from "../../utils/structure
 import { formatFrequency, formatPressure, type PressureUnit } from "../../utils/units";
 import { HullControl } from "./HullPopover";
 import { ModelBadge } from "./ModelPicker";
+import { JobsButton } from "./JobDrawer";
 import { Badge, FallbackTag, FormulaText, cx } from "./ui";
 
 export { FormulaText };
@@ -25,7 +26,7 @@ export { RELAXED_FMAX } from "../../utils/structureInfo";
 
 function Readout({ label, children, className, clip = true, title }: { label: ReactNode; children: ReactNode; className?: string; clip?: boolean; title?: string }) {
   return (
-    <div className={cx("flex min-w-0 flex-col justify-center gap-0.5 px-3 2xl:px-5", className)} title={title}>
+    <div className={cx("flex min-w-0 flex-col justify-center gap-0.5 px-3 2xl:px-4", className)} title={title}>
       <span className="flex items-center gap-2 truncate text-2xs text-fg-4">{label}</span>
       <span className={cx("flex items-center gap-2 font-mono text-sm whitespace-nowrap text-fg tabular-nums", clip && "truncate")}>{children}</span>
     </div>
@@ -136,8 +137,8 @@ function StabilityBadge() {
   }
   const n = phonon.imaginary_mode_count;
   return (
-    <Badge tone="red" title="Imaginary modes: the structure is a saddle point of the potential-energy surface">
-      Unstable · {n} imaginary mode{n === 1 ? "" : "s"}, min {formatFrequency(phonon.min_frequency_thz, unit)}
+    <Badge tone="red" title={`${n} imaginary mode${n === 1 ? "" : "s"}: the structure is a saddle point of the potential-energy surface`}>
+      Unstable · {n} imag. · min {formatFrequency(phonon.min_frequency_thz, unit)}
     </Badge>
   );
 }
@@ -149,6 +150,7 @@ function ConnectionIndicator() {
   const label = connection === "open" ? "live" : connection === "connecting" ? "connecting" : attempt > 0 ? `retry #${attempt}` : "offline";
   return (
     <div className="flex shrink-0 items-center gap-3 pr-4">
+      <JobsButton />
       <ModelBadge />
       <span className="flex items-center gap-1.5 text-xs text-fg-3">
         <span className={cx("h-2 w-2 rounded-full", dot)} />
@@ -170,7 +172,7 @@ export function TelemetryHeader() {
         <div className="hidden text-sm font-semibold text-fg 2xl:block">LatticeFlow Studio</div>
       </div>
       <div className="flex min-w-0 flex-1 items-stretch py-2">
-        <Readout label="Formula · space group">
+        <Readout label="Formula · space group" className="shrink-0">
           {crystal ? (
             <>
               <span className="font-semibold text-fg">
@@ -185,7 +187,7 @@ export function TelemetryHeader() {
             <span className="text-fg-4">—</span>
           )}
         </Readout>
-        <Readout label="Energy (uMLIP)">{crystal ? `${crystal.energy_per_atom.toFixed(3)} eV/atom` : "—"}</Readout>
+        <Readout label="Energy (uMLIP)" className="shrink-0">{crystal ? `${crystal.energy_per_atom.toFixed(3)} eV/atom` : "—"}</Readout>
         <Readout
           label={
             <>
@@ -212,7 +214,7 @@ export function TelemetryHeader() {
         </Readout>
         <BulkModulusReadout />
         <EHullReadout />
-        <Readout label="Dynamical stability" className="min-w-[180px]">
+        <Readout label="Dynamical stability" className="flex-1">
           <StabilityBadge />
         </Readout>
       </div>

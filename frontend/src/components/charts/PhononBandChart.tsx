@@ -17,6 +17,8 @@ import { useMemo, useRef, useState, type MouseEvent } from "react";
 import { selectModeAt } from "../../services/phononActions";
 import { useSettings } from "../../store/settings";
 import { useCrystalStore } from "../../store/useCrystalStore";
+import { useLibrary } from "../../store/libraryStore";
+import { kpathMismatch } from "../../utils/library";
 import type { PhononAnalysisComplete } from "../../types/protocol";
 import { formatFrequency, frequencyFactor, frequencyUnitLabel, type FrequencyUnit } from "../../utils/units";
 import { SERIES_COLORS } from "../../utils/chartData";
@@ -52,17 +54,45 @@ interface Geometry {
   y: ReturnType<typeof scale>;
 }
 
-function geometry(p: PhononAnalysisComplete, size: ChartSize): Geometry {
+function geometry(p: PhononAnalysisComplete, size: ChartSize, overlay: PhononAnalysisComplete | null = null): Geometry {
   const d = p.kpath_distances;
   const summary = classifyBands(p.frequencies_thz);
-  const [lo, hi] = frequencyRange(summary);
+  let [lo, hi] = frequencyRange(summary);
+  if (overlay) {
+    const [olo, ohi] = frequencyRange(classifyBands(overlay.frequencies_thz));
+    lo = Math.min(lo, olo);
+    hi = Math.max(hi, ohi);
+  }
   return {
     x: scale(d[0] ?? 0, d[d.length - 1] ?? 1, M.left, size.width - M.right),
     y: scale(lo, hi, size.height - M.bottom, M.top),
   };
 }
 
-function drawBase(ctx: CanvasRenderingContext2D, p: PhononAnalysisComplete, size: ChartSize, g: Geometry, unit: FrequencyUnit, colorBranches: boolean) {
+/** The compared dispersion (same k-path): dashed, in series colour 2, on the current x positions. */
+function drawOverlay(ctx: CanvasRenderingContext2D, p: PhononAnalysisComplete, o: PhononAnalysisComplete, g: Geometry) {
+  const d = p.kpath_distances;
+  const rows = branchRows(o);
+  const breaks = segmentBreaks(d);
+  const nb = rows[0]?.length ?? 0;
+  const path = new Path2D();
+  for (let b = 0; b < nb; b++) {
+    for (let q = 0; q < d.length; q++) {
+      const px = g.x(d[q]!);
+      const py = g.y(rows[q]![b]!);
+      if (q === 0 || breaks[q - 1]) path.moveTo(px, py);
+      else path.lineTo(px, py);
+    }
+  }
+  ctx.save();
+  ctx.setLineDash([4, 3]);
+  ctx.lineWidth = 1.2;
+  ctx.strokeStyle = ink(SERIES_COLORS[1]);
+  ctx.stroke(path);
+  ctx.restore();
+}
+
+function drawBase(ctx: CanvasRenderingContext2D, p: PhononAnalysisComplete, size: ChartSize, g: Geometry, unit: FrequencyUnit, colorBranches: boolean, overlay: { data: PhononAnalysisComplete; label: string } | null = null) {
   const k = frequencyFactor(unit);
   const { x, y } = g;
   const d = p.kpath_distances;
@@ -139,6 +169,24 @@ function drawBase(ctx: CanvasRenderingContext2D, p: PhononAnalysisComplete, size
   ctx.lineWidth = 1.8;
   ctx.strokeStyle = CHART_COLORS.crimson;
   ctx.stroke(imag);
+  if (overlay) {
+    drawOverlay(ctx, p, overlay.data, g);
+    // key (drawn so PNG exports carry it too)
+    ctx.font = CHART_FONT;
+    ctx.textAlign = "left";
+    ctx.textBaseline = "middle";
+    ctx.save();
+    ctx.setLineDash([4, 3]);
+    ctx.strokeStyle = ink(SERIES_COLORS[1]);
+    ctx.lineWidth = 1.2;
+    ctx.beginPath();
+    ctx.moveTo(x0 + 6, yTop + 8);
+    ctx.lineTo(x0 + 22, yTop + 8);
+    ctx.stroke();
+    ctx.restore();
+    ctx.fillStyle = CHART_COLORS.ink;
+    ctx.fillText(overlay.label, x0 + 26, yTop + 8);
+  }
   // axis label
   ctx.save();
   ctx.translate(11, (yTop + yBot) / 2);
@@ -178,29 +226,33 @@ export function PhononBandChart() {
   const geomRef = useRef<Geometry | null>(null);
   const baseRef = useRef<{ canvas: HTMLCanvasElement; key: string } | null>(null);
   const summary = useMemo(() => (phonon ? classifyBands(phonon.frequencies_thz) : null), [phonon]);
+  const ov = useLibrary((s) => s.phononOverlay);
+  const overlay = phonon && ov?.status === "ok" && ov.data && !kpathMismatch(phonon, ov.data) ? { data: ov.data, label: `dashed: ${ov.label}` } : null;
 
   useCanvasChart(
     canvasRef,
     (ctx, size) => {
       if (!phonon || phonon.kpath_distances.length === 0) return;
-      const g = geometry(phonon, size);
+      const g = geometry(phonon, size, overlay?.data ?? null);
       geomRef.current = g;
       if (renderState.exporting) {
         // Offscreen export: draw the base directly at the export resolution, no selection overlay.
-        drawBase(ctx, phonon, size, g, unit, colorBranches);
+        drawBase(ctx, phonon, size, g, unit, colorBranches, overlay);
         return;
       }
       const dpr = renderState.dpr;
       const key = `${size.width}x${size.height}@${dpr}:${unit}:${colorBranches}`;
       let base = baseRef.current;
-      if (!base || base.key !== key || (base.canvas as unknown as { _p?: unknown })._p !== phonon) {
+      const cached = base?.canvas as unknown as { _p?: unknown; _o?: unknown } | undefined;
+      if (!base || base.key !== key || cached?._p !== phonon || cached?._o !== (overlay?.data ?? null)) {
         const c = document.createElement("canvas");
         c.width = Math.round(size.width * dpr);
         c.height = Math.round(size.height * dpr);
         const bctx = c.getContext("2d")!;
         bctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-        drawBase(bctx, phonon, size, g, unit, colorBranches);
-        (c as unknown as { _p?: unknown })._p = phonon;
+        drawBase(bctx, phonon, size, g, unit, colorBranches, overlay);
+        (c as unknown as { _p?: unknown; _o?: unknown })._p = phonon;
+        (c as unknown as { _p?: unknown; _o?: unknown })._o = overlay?.data ?? null;
         base = baseRef.current = { canvas: c, key };
       }
       ctx.drawImage(base.canvas, 0, 0, size.width, size.height);
@@ -258,7 +310,7 @@ export function PhononBandChart() {
         }
       }
     },
-    () => phonon,
+    () => (overlay ? overlay.data : phonon),
   );
 
   const pick = (e: MouseEvent<HTMLCanvasElement>) => {
