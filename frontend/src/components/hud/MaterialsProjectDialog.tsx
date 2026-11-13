@@ -13,6 +13,7 @@ import { classifyMpQuery, mpErrorView, type MpErrorView } from "../../services/m
 import { commands } from "../../services/wsClient";
 import { useCrystalStore } from "../../store/useCrystalStore";
 import type { MPEntry } from "../../types/protocol";
+import { studioLimits } from "../../utils/limits";
 import { Badge, Button, FormulaText, Panel, cx, inputCls } from "./ui";
 
 const KIND_HINT = { "mp-id": "material id", chemsys: "chemical system", formula: "formula", invalid: "formula, Sr-Ti-O or mp-…" } as const;
@@ -24,6 +25,7 @@ export function MaterialsProjectDialog({ onClose }: { onClose(): void }) {
   const [loading, setLoading] = useState<string | null>(null);
   const [err, setErr] = useState<MpErrorView | null>(null);
   const connected = useCrystalStore((s) => s.connection === "open");
+  const { maxAtoms, phononMaxAtoms } = studioLimits(useCrystalStore((s) => s.health));
   const ctl = useRef<AbortController | null>(null);
   const kind = classifyMpQuery(q);
 
@@ -140,7 +142,7 @@ export function MaterialsProjectDialog({ onClose }: { onClose(): void }) {
                       </span>
                     </td>
                     <td className="px-2 text-right">
-                      <Button className="px-2 py-0.5 text-[10.5px]" disabled={!connected || loading !== null} onClick={() => void load(r.material_id)} title={r.nsites > 64 ? "More than 64 sites: phonons will not run on this cell" : undefined}>
+                      <Button className="px-2 py-0.5 text-[10.5px]" disabled={!connected || loading !== null} onClick={() => void load(r.material_id)} title={r.nsites > maxAtoms ? `More than ${maxAtoms} sites: exceeds the studio atom limit` : r.nsites > phononMaxAtoms ? `More than ${phononMaxAtoms} sites: phonons will not run on this cell` : undefined}>
                         {loading === r.material_id ? <Loader2 size={11} className="animate-spin" /> : null} Load
                       </Button>
                     </td>

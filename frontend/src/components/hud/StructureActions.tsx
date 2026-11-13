@@ -13,10 +13,10 @@ import { useState } from "react";
 import { commands } from "../../services/wsClient";
 import { OPTIMIZERS, badgeCriteria, useSettings, type Optimizer, type PhononCellMode } from "../../store/settings";
 import { useCrystalStore } from "../../store/useCrystalStore";
+import { studioLimits } from "../../utils/limits";
 import { latticeLengths, phononWarning, relaxationVerdict, suggestSupercell, SUPERCELL_MAX_ATOMS, SUPERCELL_MIN_LENGTH } from "../../utils/structureInfo";
 import { Button, NumberField, Segmented, cx } from "./ui";
 
-const PHONON_MAX_ATOMS = 64;
 
 function GearButton({ open, onClick, title }: { open: boolean; onClick(): void; title: string }) {
   return (
@@ -176,7 +176,8 @@ export function StructureActions({ compact, layout = "stack" }: { compact?: bool
   const [phononOpen, setPhononOpen] = useState(false);
   const nAtoms = crystal?.atoms.length ?? 0;
   const warning = crystal ? phononWarning(relaxationVerdict(crystal, badgeCriteria(relax))) : null;
-  const tooBig = nAtoms > PHONON_MAX_ATOMS;
+  const phononMaxAtoms = useCrystalStore((s) => studioLimits(s.health).phononMaxAtoms);
+  const tooBig = nAtoms > phononMaxAtoms;
   return (
     <div className="grid gap-2">
       <div className="flex gap-1.5">
@@ -197,7 +198,7 @@ export function StructureActions({ compact, layout = "stack" }: { compact?: bool
           variant={phononRunning ? "danger" : warning ? "warning" : "ghost"}
           className="flex-1"
           disabled={!connected || tooBig}
-          title={tooBig ? `The shake-test supports at most ${PHONON_MAX_ATOMS} atoms per cell` : (warning ?? "Finite-displacement phonons (settings: gear)")}
+          title={tooBig ? `The shake-test supports at most ${phononMaxAtoms} atoms per cell` : (warning ?? "Finite-displacement phonons (settings: gear)")}
           onClick={() => (phononRunning ? commands.stop() : commands.runPhonons())}
         >
           {phononRunning ? <Square size={12} /> : <Waves size={13} />}

@@ -25,6 +25,8 @@ Error mapping (body is always ``ErrorResponse``, ``code`` an ``ErrorCode`` value
   ``/api/mp/match``: like ``/api/mp/*`` (503 no key, 502 upstream failure, 404 ``MP_NOT_FOUND`` only
   if the client reports it outside a per-entry fetch; entries that vanish are skipped). MP having
   no entry of the formula is a 200 with ``n_searched = 0``.
+* Phase D: ``/api/health`` reports the configured size limits ``max_atoms``
+  (``LATTICEFLOW_MAX_ATOMS``) and ``phonon_max_atoms`` (``LATTICEFLOW_PHONON_MAX_ATOMS``).
 
 The handlers are HTTP-only: ``RequestValidationError`` never arises on the
 WebSocket route (that is ``WebSocketRequestValidationError``), ``ApiError`` is
@@ -55,6 +57,7 @@ from fastapi import APIRouter, Depends, FastAPI, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse, Response
 
+from app.api.ws_stream import phonon_max_atoms
 from app.config import get_settings
 from app.core import compare as compare_core
 from app.core import diffraction, hull_analyzer, mp_client, ordering
@@ -66,6 +69,7 @@ from app.core.structure_io import (
     atoms_to_extxyz,
     atoms_to_poscar,
     convert_cell,
+    max_atoms,
 )
 from app.core.umlip_engine import UMLIPEngine, reduced_formula
 from app.presets import PresetInfo, list_presets
@@ -213,6 +217,8 @@ def health(ctx: HullContext = Depends(hull_context)) -> HealthResponse:
         dtype=str(engine.dtype),
         load_error=f"{type(err).__name__}: {err}" if err is not None else None,
         hull_available=bool(ctx.api_key and ctx.api_key.strip()),
+        max_atoms=max_atoms(),
+        phonon_max_atoms=phonon_max_atoms(),
     )
 
 

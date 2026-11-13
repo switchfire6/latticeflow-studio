@@ -8,11 +8,15 @@
  * energy), like the bulk reference, because positions shift when the oldest
  * history entries are dropped; keys no longer in the history are pruned.
  *
+ * Entries never active in this session are fetched on demand (Phase D
+ * REQUEST_HISTORY_ENTRY -> HISTORY_ENTRY, see compareActions.ts) and stored
+ * here once the reply matches the entry at that position.
+ *
  * FOLLOW_INSTABILITY additionally keeps its parent structure (with its
  * phonons) so "Compare with parent" works even after the history moved on.
  */
 import { create } from "zustand";
-import type { CrystalStatePayload, HistoryEntryInfo, HistoryState, KPathLabel, PhononAnalysisComplete, PhononDosData, ServerMessage } from "../types/protocol";
+import type { CrystalStatePayload, HistoryEntry, HistoryEntryInfo, HistoryState, KPathLabel, PhononAnalysisComplete, PhononDosData, ServerMessage } from "../types/protocol";
 
 export interface PhononSnapshot {
   stable: boolean;
@@ -106,6 +110,19 @@ export class SnapshotCache {
     this.changed();
   }
 
+  /** Store a fetched HISTORY_ENTRY if it still describes the entry at its position. */
+  storeEntry(entry: HistoryEntry, history: HistoryState | null): boolean {
+    const info = history?.entries?.find((e) => e.position === entry.position);
+    if (!info || info.label !== entry.label || !payloadMatchesEntry(entry.crystal, info)) return false;
+    const key = historyKey(info);
+    const prev = this.map.get(key);
+    this.map.delete(key);
+    this.map.set(key, { key, label: info.label, crystal: entry.crystal, phonon: prev?.phonon ?? null });
+    while (this.map.size > SNAPSHOT_LIMIT) this.map.delete(this.map.keys().next().value!);
+    this.changed();
+    return true;
+  }
+
   /** Call after every dispatched server message with the store's current state. */
   observe(msg: ServerMessage, src: SnapshotSource & { phonon: PhononAnalysisComplete | null; dos: PhononDosData | null }): void {
     if (msg.type === "HISTORY_STATE") {
@@ -123,6 +140,10 @@ export class SnapshotCache {
         changed = true;
       }
       if (changed) this.changed();
+      return;
+    }
+    if (msg.type === "HISTORY_ENTRY") {
+      this.storeEntry(msg.payload, src.history);
       return;
     }
     if (msg.type === "PHONON_ANALYSIS_COMPLETE" || msg.type === "PHONON_DOS_DATA") {

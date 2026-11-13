@@ -26,8 +26,9 @@ is a deterministic interpolation with a physics corrector. A learned
 Algorithm (all randomness from ``numpy.random.default_rng(seed)`` child streams)
 -------------------------------------------------------------------------------
 Composition (``_resolve_plan``)
-    ``request.composition`` if given (counts are used as is; must be placeable in
-    the space group). Otherwise: every element gets one of its pymatgen
+    ``request.composition`` if given (counts are used as is if placeable in the
+    space group; otherwise the integer multiples x2, x3, x4 are tried, smallest
+    first, within the atom limit - e.g. NaCl in #225 becomes Na4Cl4). Otherwise: every element gets one of its pymatgen
     ``common_oxidation_states`` (no mixed valence); count vectors (each >= 1) are
     enumerated by total N in order |N - num_atoms| = 0, 1, 2 ... (smaller N first
     on a tie), and a vector is admissible iff sum n_i q_i = 0 for some choice of
@@ -236,7 +237,9 @@ CELL_BETA = 0.5
 MAX_STRAIN_STEP = 0.01
 K_GUESS_GPA = 80.0
 K_PRIME = 4.0
-MAX_ATOMS = 64
+MAX_ATOMS = 64          # generator cap (further capped by the studio limit, LATTICEFLOW_MAX_ATOMS)
+#: Integer multiples of an explicit composition tried when it does not fit the space group (Phase D).
+COMPOSITION_MULTIPLES = (1, 2, 3, 4)
 MAX_COMBOS = 16
 SAMPLES_PER_COMBO = 3
 POOL_SIZE = 24
@@ -630,6 +633,13 @@ def _candidate_groups(request: StartFlowGenerationPayload) -> List[int]:
     return [g for s in _DEFAULT_ORDER for g in REPRESENTATIVE_GROUPS[s]]
 
 
+def _atom_limit() -> int:
+    """Atoms per generated cell: the generator cap, further capped by the studio limit."""
+    from app.core.structure_io import max_atoms
+
+    return min(MAX_ATOMS, max_atoms())
+
+
 def _resolve_plan(request: StartFlowGenerationPayload) -> _Plan:
     if not request.elements:
         raise ValueError("elements must contain at least one element")
@@ -653,18 +663,29 @@ def _resolve_plan(request: StartFlowGenerationPayload) -> _Plan:
         extra = sorted(set(comp) - set(elements))
         if extra:
             raise ValueError(f"composition contains elements not listed in elements: {extra}")
-        if sum(comp.values()) > MAX_ATOMS:
-            raise ValueError(f"composition has {sum(comp.values())} atoms; at most {MAX_ATOMS} per cell are supported")
+        limit = _atom_limit()
+        if sum(comp.values()) > limit:
+            raise ValueError(f"composition has {sum(comp.values())} atoms; at most {limit} per cell are supported")
         els = [e for e in elements if e in comp]
-        counts = [comp[e] for e in els]
-        for g in groups:
-            if _compatible(g, counts):
-                q = _neutral_states(els, counts, _is_metallic_system(els)) or tuple(0 for _ in els)
-                return _make_plan(g, els, counts, list(q))
+        base = [comp[e] for e in els]
+        tried: List[int] = []
+        for m in COMPOSITION_MULTIPLES:
+            counts = [m * c for c in base]
+            if sum(counts) > limit:
+                break
+            tried.append(m)
+            for g in groups:
+                if _compatible(g, counts):
+                    q = _neutral_states(els, counts, _is_metallic_system(els)) or tuple(0 for _ in els)
+                    return _make_plan(g, els, counts, list(q))
         where = f"space group {groups[0]}" if len(groups) == 1 else f"any of space groups {groups}"
+        scaled = [f"x{m}" for m in tried if m > 1]
+        also = f" (also tried the multiples {', '.join(scaled)} within the {limit}-atom limit)" if scaled else (
+            f" (its multiples exceed the {limit}-atom limit)")
         raise ValueError(
-            f"composition {comp} cannot be placed on the Wyckoff positions of {where}")
+            f"composition {comp} cannot be placed on the Wyckoff positions of {where}{also}")
 
+    max_n = _atom_limit()
     metallic = _is_metallic_system(elements)
     target = int(request.num_atoms)
     n_el = len(elements)
@@ -675,7 +696,7 @@ def _resolve_plan(request: StartFlowGenerationPayload) -> _Plan:
     def comps(total: int):
         if total not in by_total:
             found = []
-            if n_el <= total <= MAX_ATOMS:
+            if n_el <= total <= max_n:
                 for c in _compositions_with_total(n_el, total):
                     q = _neutral_states(elements, c, metallic)
                     if q is not None:
@@ -684,11 +705,11 @@ def _resolve_plan(request: StartFlowGenerationPayload) -> _Plan:
             by_total[total] = found
         return by_total[total]
 
-    for delta in range(0, MAX_ATOMS + 1):
-        totals = [t for t in (target - delta, target + delta) if n_el <= t <= MAX_ATOMS]
+    for delta in range(0, max_n + 1):
+        totals = [t for t in (target - delta, target + delta) if n_el <= t <= max_n]
         totals = sorted(set(totals))
         if not totals:
-            if target - delta < n_el and target + delta > MAX_ATOMS:
+            if target - delta < n_el and target + delta > max_n:
                 break
             continue
         for g in groups:
@@ -697,7 +718,7 @@ def _resolve_plan(request: StartFlowGenerationPayload) -> _Plan:
                     if _compatible(g, c):
                         return _make_plan(g, elements, list(c), list(q))
     raise ValueError(
-        f"no charge-neutral composition of {elements} with <= {MAX_ATOMS} atoms fits space group(s) {groups}")
+        f"no charge-neutral composition of {elements} with <= {max_n} atoms fits space group(s) {groups}")
 
 
 def _make_plan(g: int, elements: List[str], counts: List[int], charges: List[int]) -> _Plan:

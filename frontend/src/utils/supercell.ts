@@ -4,8 +4,10 @@
  * (defect–image) distance and a suggested diagonal supercell.
  */
 
-/** Studio atom limit (backend structure_io.MAX_ATOMS). */
-export const MAX_STUDIO_ATOMS = 128;
+import { DEFAULT_MAX_ATOMS } from "./limits";
+
+/** Default studio atom limit; the live one comes from /api/health (utils/limits.ts). */
+export const MAX_STUDIO_ATOMS = DEFAULT_MAX_ATOMS;
 /** Below this shortest periodic distance a point defect interacts with its images. */
 export const DEFECT_MIN_DISTANCE = 10;
 

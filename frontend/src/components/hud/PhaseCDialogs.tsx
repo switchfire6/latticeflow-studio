@@ -24,7 +24,8 @@ import type { OrderingResponse } from "../../types/protocol";
 import { committeeVerdict, resolveHistoryRef } from "../../utils/analysisC";
 import { cpkHex, elementBySymbol, normalizeSymbol } from "../../utils/cpkColors";
 import { flattenMatrix, invert3, minimumImageCart, type Vec3 } from "../../utils/latticeMath";
-import { MAX_STUDIO_ATOMS, SUPERCELL_PRESETS, diagonalMatrix, previewSupercell, shortestPeriodicDistance, substitutionCount, suggestDiagonal, DEFECT_MIN_DISTANCE, type IntMatrix } from "../../utils/supercell";
+import { studioLimits } from "../../utils/limits";
+import { SUPERCELL_PRESETS, diagonalMatrix, previewSupercell, shortestPeriodicDistance, substitutionCount, suggestDiagonal, DEFECT_MIN_DISTANCE, type IntMatrix } from "../../utils/supercell";
 import { ProgressBar } from "./ElasticPane";
 import { refreshModels } from "./ModelPicker";
 import { PeriodicTablePicker } from "./PeriodicTablePicker";
@@ -126,13 +127,14 @@ function MatrixInputs({ m, onChange }: { m: IntMatrix; onChange(m: IntMatrix): v
 export function SupercellDialog() {
   const crystal = useCrystalStore((s) => s.crystal);
   const connected = useCrystalStore((s) => s.connection === "open");
+  const maxAtoms = useCrystalStore((s) => studioLimits(s.health).maxAtoms);
   const [m, setM] = useState<IntMatrix>(diagonalMatrix([2, 2, 2]));
   if (!crystal) return null;
   const L = crystal.lattice.matrix;
   const n = crystal.atoms.length;
-  const pv = previewSupercell(m, L, n);
+  const pv = previewSupercell(m, L, n, maxAtoms);
   const d0 = shortestPeriodicDistance(L);
-  const sugg = suggestDiagonal(L, n);
+  const sugg = suggestDiagonal(L, n, DEFECT_MIN_DISTANCE, maxAtoms);
   return (
     <Modal title="Make supercell" onClose={close}>
       <div className="space-y-2.5 text-[11px] text-slate-300">
@@ -146,7 +148,7 @@ export function SupercellDialog() {
               {p.label}
             </Button>
           ))}
-          <Button className="px-2 py-0.5 text-[10.5px]" title={`Smallest diagonal cell with every vector ≥ ${DEFECT_MIN_DISTANCE} Å within ${MAX_STUDIO_ATOMS} atoms`} onClick={() => setM(diagonalMatrix(sugg))}>
+          <Button className="px-2 py-0.5 text-[10.5px]" title={`Smallest diagonal cell with every vector ≥ ${DEFECT_MIN_DISTANCE} Å within ${maxAtoms} atoms`} onClick={() => setM(diagonalMatrix(sugg))}>
             suggest {sugg.join("×")}
           </Button>
         </div>
@@ -677,7 +679,8 @@ export function OrderingDialog() {
   const disordered = useCrystalStore((s) => s.disordered);
   const model = useCrystalStore((s) => s.model);
   const connected = useCrystalStore((s) => s.connection === "open");
-  const [maxAtoms, setMaxAtoms] = useState(64);
+  const studioMaxAtoms = useCrystalStore((s) => studioLimits(s.health).maxAtoms);
+  const [maxAtoms, setMaxAtoms] = useState(() => Math.min(64, studioMaxAtoms));
   const [nCand, setNCand] = useState(8);
   const [state, setState] = useState<{ status: "idle" | "busy" | "ok" | "error"; result?: OrderingResponse; error?: string }>({ status: "idle" });
   const run = async () => {
@@ -716,7 +719,7 @@ export function OrderingDialog() {
             <div className="flex items-end gap-2">
               <label className="block w-28">
                 <div className="mb-0.5 text-[10px] text-slate-500">max atoms</div>
-                <input className={inputCls} inputMode="numeric" value={maxAtoms} onChange={(e) => setMaxAtoms(Math.max(1, Math.min(MAX_STUDIO_ATOMS, Number.parseInt(e.target.value, 10) || 1)))} />
+                <input className={inputCls} inputMode="numeric" value={maxAtoms} onChange={(e) => setMaxAtoms(Math.max(1, Math.min(studioMaxAtoms, Number.parseInt(e.target.value, 10) || 1)))} />
               </label>
               <label className="block w-28">
                 <div className="mb-0.5 text-[10px] text-slate-500">candidates</div>

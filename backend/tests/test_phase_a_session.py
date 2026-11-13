@@ -536,7 +536,7 @@ def test_stop_stream_records_stopped_entry(slow_hstudio):
     s.send("STOP_STREAM")
     msgs = s.until(["STREAM_STOPPED"])
     assert _types(msgs[:-1]) == ["RELAXATION_FRAME"] * (len(msgs) - 1)
-    assert msgs[-1]["payload"] == {"stopped": "START_RELAXATION"}
+    assert msgs[-1]["payload"]["stopped"] == "START_RELAXATION"
     h = s.history()
     assert h["label"] == "Relaxation (stopped)" and h["position"] == 2
     last = (msgs[:-1] or [{"payload": frames[-1]}])[-1]["payload"]["crystal"]
@@ -555,7 +555,7 @@ def test_undo_cancels_running_stream(slow_hstudio):
         s.expect("RELAXATION_FRAME")
     s.send("UNDO")
     msgs = s.until(["STREAM_STOPPED"])
-    assert msgs[-1]["payload"] == {"stopped": "START_RELAXATION"}
+    assert msgs[-1]["payload"]["stopped"] == "START_RELAXATION"
     # Wire order: STREAM_STOPPED, HISTORY_STATE (stopped push), SINGLE_POINT_UPDATE, HISTORY_STATE (undo).
     h_stop = s.history()
     assert h_stop["label"] == "Relaxation (stopped)" and h_stop["position"] == 2 and h_stop["length"] == 3

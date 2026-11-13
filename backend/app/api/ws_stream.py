@@ -94,7 +94,7 @@ Phase B commands (terminal messages; every stream still ends with exactly one
 terminal group, ``STREAM_STOPPED`` or ``ERROR``)
 -----------------------------------------------------------------------------
 * ``RUN_PHONON_SHAKE_TEST`` gains ``cell_mode`` / ``min_supercell_length``
-  (passed to ``run_phonon_analysis``). The ``PHONON_MAX_ATOMS`` limit applies to
+  (passed to ``run_phonon_analysis``). The ``phonon_max_atoms()`` limit applies to
   the displayed cell; band indices are validated against ``n_branches``
   (3 N of the phonon cell); eigenvectors stay displayed-atom indexed, so the
   unstable-actor flags work in both modes. A ``ValueError`` of the phonon
@@ -136,7 +136,7 @@ Phase C1 commands (IMPROVEMENT_SUGGESTIONS.md §5.7-5.10, §6.2)
 * ``MAKE_SUPERCELL`` / ``ADD_ATOM`` (instant, state-changing like ``DELETE_ATOM``):
   ``SINGLE_POINT_UPDATE`` + ``HISTORY_STATE`` (labels "Make supercell <label>"
   with ``defects.supercell_label``, "Add <El> at (u, v, w)" with 3 decimals).
-  Over ``MAX_ATOMS``: ``STRUCTURE_TOO_LARGE``; det <= 0, an atom too close or
+  Over ``max_atoms()``: ``STRUCTURE_TOO_LARGE``; det <= 0, an atom too close or
   any other ``ValueError``: ``INVALID_OPERATION``; unknown / Z > 89 element:
   ``INVALID_ELEMENT``.
 * ``COMPUTE_FORMATION_ENERGY`` (streaming, reads only, no history push):
@@ -182,12 +182,43 @@ Phase C2 commands (IMPROVEMENT_SUGGESTIONS.md §7.5)
   ``COMPUTE_FAILED``; non-ionic composition, no prototypes found or another
   ``ValueError``: ``INVALID_OPERATION``. Cancellable at every MP call, relaxation
   step and hull reference.
+
+Phase D (protocol ergonomics, IMPROVEMENT_SUGGESTIONS.md §7.7)
+--------------------------------------------------------------
+* ``request_id``: an optional envelope field (<= 64 chars), also read from an
+  otherwise invalid envelope. Every message queued by ``_send`` is stamped with
+  ``self._rid`` (top-level ``"request_id"``; absent when None). The processor
+  sets ``_rid`` to the command it runs (replies, its ``ERROR``, the
+  ``HISTORY_STATE`` it pushes); a job captures the id of the command that started
+  it, and every loop-thread section acting for a job - ``_apply_job_output``
+  (frames, ``PROGRESS``, terminal group, its ``HISTORY_STATE``, a stream ``ERROR``)
+  and ``_cancel_live`` (``STREAM_STOPPED`` and its push) - runs under
+  ``_as_request(job.request_id)``. These sections are synchronous, so the
+  override/restore cannot interleave with another coroutine; the ordering and
+  concurrency guarantees above are unchanged. Hence a stream's ``STREAM_STOPPED``
+  carries the stream's id even when a later command (with another id) cancelled
+  it; ``STOP_STREAM``'s own id appears only on ``{stopped: null}``. Coalesced
+  drag frames are never answered, so their ids never appear. The connect-time
+  preset load carries no id.
+* ``STREAM_STOPPED.history_pushed`` / ``ERROR.history_pushed``: true iff a
+  ``HISTORY_STATE`` for that stream follows (frames had been applied, or the
+  terminal group has its own label, e.g. "Relaxation (diverged, restored)").
+  ``ERROR.after_terminal``: true for ``RELAXATION_DIVERGED`` sent after the final
+  ``RELAXATION_FRAME`` (relaxation and ``FOLLOW_INSTABILITY``).
+* ``REQUEST_HISTORY_ENTRY {position}`` (instant, cancels nothing, changes nothing):
+  ``HISTORY_ENTRY {position, label, crystal}`` with the stored payload; unknown
+  position: ``INDEX_OUT_OF_RANGE``.
+* Size limits are read at call time from ``config.get_settings()``:
+  ``structure_io.max_atoms()`` (``LATTICEFLOW_MAX_ATOMS``, default 128) and
+  :func:`phonon_max_atoms` (``LATTICEFLOW_PHONON_MAX_ATOMS``, default 64).
+  ``PHONON_MAX_ATOMS`` / ``structure_io.MAX_ATOMS`` remain as default / import-time aliases.
 """
 
 from __future__ import annotations
 
 import asyncio
 import collections
+import contextlib
 import json
 import logging
 import threading
@@ -208,7 +239,7 @@ from app.core import phonon_engine, relaxer, structure_io
 from app.core.flow_generator import FlowCancelled, RiemannianFlowGenerator
 from app.core.phonon_engine import PhononAnalysis, PhononCancelled
 from app.core.relaxer import RelaxationDivergedError
-from app.core.structure_io import MAX_ATOMS, StructureIOError, atoms_from_cif
+from app.core.structure_io import StructureIOError, atoms_from_cif, max_atoms
 from app.core.umlip_engine import ModelUnavailableError, UMLIPEngine, get_engine
 from app.presets import DEFAULT_PRESET_ID, load_preset
 from app.schemas.crystal import CrystalStatePayload
@@ -259,18 +290,22 @@ from app.schemas.messages import (
     SubstituteFractionPayload,
     # Phase C2
     PrototypeSearchPayload,
+    # Phase D
+    HistoryEntry,
+    RequestHistoryEntryPayload,
 )
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
-__all__ = ["router", "StudioSession", "PHONON_MAX_ATOMS", "HISTORY_LIMIT"]
+__all__ = ["router", "StudioSession", "PHONON_MAX_ATOMS", "HISTORY_LIMIT", "phonon_max_atoms"]
 
 # --------------------------------------------------------------------------- #
 # Tunables
 # --------------------------------------------------------------------------- #
-#: Phonon shake-test limit (the studio-wide limit is ``structure_io.MAX_ATOMS``).
+#: Default phonon shake-test limit (the studio-wide limit is ``structure_io.max_atoms()``);
+#: configurable with ``LATTICEFLOW_PHONON_MAX_ATOMS`` - read it with :func:`phonon_max_atoms`.
 PHONON_MAX_ATOMS = 64
 #: Relative participation |e_k|^2 / max_k |e_k|^2 in the softest mode that marks an unstable actor.
 ACTOR_PARTICIPATION_THRESHOLD = 0.5
@@ -316,6 +351,7 @@ _PAYLOAD_MODELS: Dict[ClientCommand, type] = {
     _C.START_MD: StartMDPayload,
     _C.COMMITTEE_EVALUATE: CommitteeEvaluatePayload,
     _C.PROTOTYPE_SEARCH: PrototypeSearchPayload,
+    _C.REQUEST_HISTORY_ENTRY: RequestHistoryEntryPayload,
 }
 _STREAMING = frozenset(
     {
@@ -326,6 +362,14 @@ _STREAMING = frozenset(
     }
 )
 _INIT = "__INIT__"  # internal first FIFO item: load the default preset
+
+
+def phonon_max_atoms() -> int:
+    """Phonon shake-test atoms-per-cell limit (``Settings.phonon_max_atoms``, default 64)."""
+    try:
+        return int(get_settings().phonon_max_atoms)
+    except ValueError:  # malformed environment: fall back to the default
+        return PHONON_MAX_ATOMS
 
 
 # --------------------------------------------------------------------------- #
@@ -482,6 +526,7 @@ class _Command:
     payload: Optional[BaseModel] = None
     error: Optional[Dict[str, Any]] = None  # a parse/validation ERROR message to emit in order
     streams: bool = False                  # starts a stream (counts towards _pending_streams)
+    request_id: Optional[str] = None       # Phase D: echoed on every message the command causes
 
 
 @dataclass
@@ -497,8 +542,9 @@ class _Job:
     """One in-flight streaming job (worker thread + cancel flag)."""
 
     def __init__(self, command: str, loop: asyncio.AbstractEventLoop, label: str = "",
-                 join_on_cancel: bool = True) -> None:
+                 join_on_cancel: bool = True, request_id: Optional[str] = None) -> None:
         self.command = command
+        self.request_id = request_id        # of the command that started the stream
         self.label = label                  # history label prefix, e.g. "Relaxation"
         # False: after a cancel the worker touches no session state and no engine the
         # session uses (SET_MODEL: a model load / download), so nobody waits for it to exit.
@@ -558,6 +604,11 @@ class StudioSession:
         self._pending_streams = 0
         self._closing = False
         self.coalesced_perturbs = 0
+        # Phase D: request_id stamped on every message queued by ``_send`` (loop thread only).
+        # The processor sets it for the command it runs; synchronous loop-thread sections that
+        # act for another request (job outputs, a stream's cancellation) override it with
+        # ``_as_request`` and restore it, so interleaving at an ``await`` cannot mislabel.
+        self._rid: Optional[str] = None
         # Undo history (loop thread only).
         self._history: List[_HistoryEntry] = []
         self._history_pos = -1
@@ -618,8 +669,10 @@ class StudioSession:
 
     # ================================================================ parsing
     def _parse(self, text: Optional[str]) -> _Command:
+        rid: Optional[str] = None
+
         def bad(code: ErrorCode, msg: str, cmd: Optional[str]) -> _Command:
-            return _Command(cmd or "", error=_error_message(code, msg, cmd))
+            return _Command(cmd or "", error=_error_message(code, msg, cmd), request_id=rid)
 
         if text is None:
             return bad(ErrorCode.INVALID_MESSAGE, "message is not UTF-8 text", None)
@@ -629,6 +682,8 @@ class StudioSession:
             return bad(ErrorCode.INVALID_MESSAGE, "message is not valid JSON", None)
         if isinstance(raw, dict) and raw.get("payload", {}) is None:
             raw = {**raw, "payload": {}}
+        if isinstance(raw, dict) and isinstance(raw.get("request_id"), str) and len(raw["request_id"]) <= 64:
+            rid = raw["request_id"]  # echoed even if the rest of the envelope is invalid
         try:
             env = Envelope.model_validate(raw)
         except ValidationError:
@@ -648,7 +703,7 @@ class StudioSession:
         streams = ctype in _STREAMING or (
             ctype is _C.PERTURB_OR_TRANSMUTE_ATOM and bool(payload.auto_relax)
         )
-        return _Command(ctype.value, payload=payload, streams=streams)
+        return _Command(ctype.value, payload=payload, streams=streams, request_id=env.request_id)
 
     # ================================================================ queues
     def _enqueue(self, command: _Command) -> None:
@@ -668,7 +723,18 @@ class StudioSession:
             if release is not None:
                 release()
             return
+        if self._rid is not None:
+            message = {**message, "request_id": self._rid}
         self._outbox.put_nowait((message, release))
+
+    @contextlib.contextmanager
+    def _as_request(self, request_id: Optional[str]) -> Iterator[None]:
+        """Loop thread, synchronous sections only: stamp sends with ``request_id``, then restore."""
+        previous, self._rid = self._rid, request_id
+        try:
+            yield
+        finally:
+            self._rid = previous
 
     def _send_error(self, code: ErrorCode | str, message: str, command: Optional[str]) -> None:
         self._send(_error_message(code, message, command))
@@ -718,6 +784,7 @@ class StudioSession:
     async def _processor(self) -> None:
         while True:
             command = self._coalesce(await self._next_command())
+            self._rid = command.request_id
             try:
                 if command.error is not None:
                     self._send(command.error)
@@ -735,6 +802,7 @@ class StudioSession:
                     command.type if command.type != _INIT else None,
                 )
             finally:
+                self._rid = None
                 if command.streams:
                     self._pending_streams -= 1
 
@@ -767,6 +835,7 @@ class StudioSession:
             _C.START_MD.value: self._cmd_md,
             _C.COMMITTEE_EVALUATE.value: self._cmd_committee,
             _C.PROTOTYPE_SEARCH.value: self._cmd_prototype_search,
+            _C.REQUEST_HISTORY_ENTRY.value: self._cmd_history_entry,
         }[command.type]
         await handler(command.payload)
 
@@ -786,16 +855,19 @@ class StudioSession:
         """Loop thread: terminate a live job, queue its STREAM_STOPPED and record what it left behind."""
         job.cancel.set()
         job.terminated = True
-        self._send(_message(ServerEvent.STREAM_STOPPED, StreamStopped(stopped=job.command)))
-        if job.frames_applied > 0:
-            self._history_push(f"{job.label} (stopped)")
+        pushed = job.frames_applied > 0 and self.atoms is not None and self.payload is not None
+        with self._as_request(job.request_id):  # the stream's id, whoever triggered the cancel
+            self._send(_message(ServerEvent.STREAM_STOPPED, StreamStopped(stopped=job.command, history_pushed=pushed)))
+            if pushed:
+                self._history_push(f"{job.label} (stopped)")
 
     def _handle_stop_from_receiver(self, command: _Command) -> None:
         if self._pending_streams > 0:
             # A stream is queued or being started: stop it in order, not whatever ran before it.
             self._enqueue(command)
         else:
-            self._stop_now()
+            with self._as_request(command.request_id):  # used only by {stopped: null}
+                self._stop_now()
 
     async def _cmd_stop(self, _payload: StopStreamPayload) -> None:
         self._stop_now()
@@ -821,7 +893,7 @@ class StudioSession:
     def _launch(self, command: str, label: str, target: Callable[..., None], *args,
                 join_on_cancel: bool = True) -> _Job:
         assert self.loop is not None
-        job = _Job(command, self.loop, label, join_on_cancel)
+        job = _Job(command, self.loop, label, join_on_cancel, self._rid)
         self._job = job
         self._drag_open = None  # a stream ends the current drag gesture
 
@@ -870,22 +942,30 @@ class StudioSession:
             if release is not None:
                 release()
             return
-        if atoms is not None:
-            self.atoms = atoms
-            self.version += 1
-            job.frames_applied += 1
-        if payload is not None:
-            self.payload = payload
-        if on_apply is not None:
-            on_apply()
-        for i, message in enumerate(messages):
-            self._send(message, release if i == len(messages) - 1 else None)
-        if terminal:
-            job.terminated = True
-            if history_label is None and job.frames_applied > 0:
-                history_label = f"{job.label} (failed)"
-            if history_label is not None:
-                self._history_push(history_label)
+        with self._as_request(job.request_id):
+            if atoms is not None:
+                self.atoms = atoms
+                self.version += 1
+                job.frames_applied += 1
+            if payload is not None:
+                self.payload = payload
+            if on_apply is not None:
+                on_apply()
+            if terminal:
+                if history_label is None and job.frames_applied > 0:
+                    history_label = f"{job.label} (failed)"
+                if history_label is not None and (self.atoms is None or self.payload is None):
+                    history_label = None  # _history_push would be a no-op
+                if history_label is not None:
+                    for message in messages:  # the HISTORY_STATE pushed below follows this ERROR
+                        if message.get("type") == ServerEvent.ERROR.value:
+                            message["payload"]["history_pushed"] = True
+            for i, message in enumerate(messages):
+                self._send(message, release if i == len(messages) - 1 else None)
+            if terminal:
+                job.terminated = True
+                if history_label is not None:
+                    self._history_push(history_label)
 
     def _emit_frame(self, job: _Job, event: ServerEvent, frame: BaseModel, atoms: Atoms,
                     payload: CrystalStatePayload) -> None:
@@ -1020,6 +1100,15 @@ class StudioSession:
 
     async def _cmd_redo(self, _payload: RedoPayload) -> None:
         await self._history_move(+1)
+
+    async def _cmd_history_entry(self, p: RequestHistoryEntryPayload) -> None:
+        """Phase D: the stored structure of one entry (instant, cancels nothing, changes nothing)."""
+        n = len(self._history)
+        if not 0 <= p.position < n:
+            raise CommandError(ErrorCode.INDEX_OUT_OF_RANGE, f"position {p.position} out of range [0, {n})")
+        entry = self._history[p.position]
+        self._send(_message(ServerEvent.HISTORY_ENTRY,
+                            HistoryEntry(position=p.position, label=entry.label, crystal=entry.payload)))
 
     # ================================================================ instant commands
     async def _cmd_init(self, _payload: Any) -> None:
@@ -1207,7 +1296,9 @@ class StudioSession:
                 except StopIteration:
                     pass
                 except RelaxationDivergedError as exc:
-                    messages.append(_error_message(ErrorCode.RELAXATION_DIVERGED, str(exc), job.command))
+                    error = _error_message(ErrorCode.RELAXATION_DIVERGED, str(exc), job.command)
+                    error["payload"]["after_terminal"] = True  # follows the final RELAXATION_FRAME
+                    messages.append(error)
                     outcome = "diverged, restored"
                 self._emit_terminal(job, messages, snap, frame.crystal, history_label=f"{job.label} ({outcome})")
                 return
@@ -1256,10 +1347,11 @@ class StudioSession:
 
     async def _cmd_phonon(self, p: RunPhononShakeTestPayload) -> None:
         atoms = self._require_atoms()
-        if len(atoms) > PHONON_MAX_ATOMS:
+        limit = phonon_max_atoms()
+        if len(atoms) > limit:
             raise CommandError(
                 ErrorCode.STRUCTURE_TOO_LARGE,
-                f"phonon shake-test supports at most {PHONON_MAX_ATOMS} atoms per cell (structure has {len(atoms)})",
+                f"phonon shake-test supports at most {limit} atoms per cell (structure has {len(atoms)})",
             )
         if any(n < 1 for n in p.supercell_dim):
             raise CommandError(ErrorCode.INVALID_PAYLOAD, f"supercell_dim entries must be >= 1, got {p.supercell_dim}")
@@ -1444,10 +1536,11 @@ class StudioSession:
         except ValueError as exc:
             raise CommandError(ErrorCode.INVALID_OPERATION, str(exc)) from None
         n_super = int(np.prod(mult)) * analysis.n_atoms
-        if n_super > MAX_ATOMS:
+        limit = max_atoms()
+        if n_super > limit:
             raise CommandError(
                 ErrorCode.STRUCTURE_TOO_LARGE,
-                f"the commensurate supercell {tuple(mult)} has {n_super} atoms; the studio limit is {MAX_ATOMS}",
+                f"the commensurate supercell {tuple(mult)} has {n_super} atoms; the studio limit is {limit}",
             )
         await self._end_job()
         engine = self.engine
@@ -1485,10 +1578,11 @@ class StudioSession:
         det = int(round(float(np.linalg.det(np.array(matrix, dtype=float)))))
         if det <= 0:
             raise CommandError(ErrorCode.INVALID_OPERATION, f"supercell matrix must have det > 0 (got {det})")
-        if len(atoms) * det > MAX_ATOMS:
+        limit = max_atoms()
+        if len(atoms) * det > limit:
             raise CommandError(
                 ErrorCode.STRUCTURE_TOO_LARGE,
-                f"the supercell would have {len(atoms) * det} atoms; the studio limit is {MAX_ATOMS}",
+                f"the supercell would have {len(atoms) * det} atoms; the studio limit is {limit}",
             )
         await self._end_job()
         work = _snapshot(self._require_atoms())
@@ -1507,8 +1601,9 @@ class StudioSession:
         frac = [float(x) for x in p.frac_coords]
         if not all(np.isfinite(frac)):
             raise CommandError(ErrorCode.INVALID_PAYLOAD, "frac_coords must be finite")
-        if len(atoms) + 1 > MAX_ATOMS:
-            raise CommandError(ErrorCode.STRUCTURE_TOO_LARGE, f"the studio limit is {MAX_ATOMS} atoms")
+        limit = max_atoms()
+        if len(atoms) + 1 > limit:
+            raise CommandError(ErrorCode.STRUCTURE_TOO_LARGE, f"the studio limit is {limit} atoms")
         await self._end_job()
         work = _snapshot(self._require_atoms())
         try:

@@ -179,7 +179,7 @@ def test_set_model_cancel(slow_mstudio, monkeypatch):
         progress = s.expect("PROGRESS")
         assert progress["command"] == "SET_MODEL" and progress["total"] == 0
         s.send("STOP_STREAM")
-        assert s.expect("STREAM_STOPPED") == {"stopped": "SET_MODEL"}
+        assert s.expect("STREAM_STOPPED")["stopped"] == "SET_MODEL"
         # Not joined: the next command answers while the load is still blocked, on the old model.
         t0 = time.perf_counter()
         assert _probe_energy(s, s.initial) == pytest.approx(s.initial["energy_per_atom"])
@@ -311,7 +311,7 @@ def test_phonon_convergence_cancel_keeps_cache(slow_mstudio, slow_fake_default):
     s.send("CHECK_PHONON_CONVERGENCE", {})
     s.expect("PROGRESS")
     s.send("STOP_STREAM")
-    assert s.until(["STREAM_STOPPED"])[-1]["payload"] == {"stopped": "CHECK_PHONON_CONVERGENCE"}
+    assert s.until(["STREAM_STOPPED"])[-1]["payload"]["stopped"] == "CHECK_PHONON_CONVERGENCE"
     slow_fake_default.slow_state["delay"] = 0.0
     s.send("REQUEST_EIGENMODE", {"q_index": 0, "band_index": 0})
     mode = s.expect("EIGENMODE_DATA", timeout=30.0)["eigenmode"]
@@ -340,6 +340,6 @@ def test_elastic_tensor_cancel(slow_mstudio, slow_fake_default):
     s.expect("PROGRESS", timeout=30.0)
     s.send("STOP_STREAM")
     msgs = s.until(["STREAM_STOPPED"])
-    assert msgs[-1]["payload"] == {"stopped": "COMPUTE_ELASTIC_TENSOR"}
+    assert msgs[-1]["payload"]["stopped"] == "COMPUTE_ELASTIC_TENSOR"
     assert "ELASTIC_TENSOR_RESULT" not in _types(msgs)
     s.assert_silent(0.5)

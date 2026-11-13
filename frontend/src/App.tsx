@@ -111,13 +111,14 @@ export function App() {
             <div className="absolute inset-0 grid place-items-center font-mono text-[12px] text-slate-500">loading 3D engine…</div>
           )}
           <div className="pointer-events-none absolute inset-0">
-            <div className="absolute top-3 left-3 flex flex-col items-start gap-2">
+            {/* max-w keeps the column clear of the 310 px scorecard (+ margins) at 1280 px */}
+            <div className="absolute top-3 left-3 flex max-w-[calc(100%-346px)] flex-col items-start gap-2">
               <ToolModeBar />
               <EigenmodePill />
+              <FollowBanner />
             </div>
             <div className="absolute top-3 left-1/2 flex -translate-x-1/2 flex-col items-center gap-2">
               <StreamProgress />
-              <FollowBanner />
             </div>
             <div className="absolute top-3 right-3">
               <Scorecard />

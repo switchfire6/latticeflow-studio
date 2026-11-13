@@ -16,6 +16,8 @@ LATTICEFLOW_MACE_ALLOW_DOWNLOAD    ``1`` (default) | ``0``: never touch the netw
 MP_API_KEY                         optional Materials Project key (convex-hull lookup, Phase 5)
 LATTICEFLOW_HULL_CACHE_DIR         relaxed hull reference cache (default ~/.cache/latticeflow/hull), read by app/core/hull_analyzer.py
 LATTICEFLOW_CORS_ORIGINS           comma-separated allowed origins (default: Vite dev server on :5173), read by app/main.py
+LATTICEFLOW_MAX_ATOMS              studio-wide atoms-per-structure limit (default 128; §7.7)
+LATTICEFLOW_PHONON_MAX_ATOMS       phonon shake-test atoms-per-cell limit (default 64; §7.7)
 """
 
 from __future__ import annotations
@@ -28,6 +30,9 @@ from typing import Mapping, Optional
 _VALID_DTYPES = ("float32", "float64")
 _VALID_UMLIP = ("auto", "mace", "fallback")
 _TRUE = {"1", "true", "yes", "on"}
+#: Defaults of the configurable size limits (Phase D, §7.7).
+DEFAULT_MAX_ATOMS = 128
+DEFAULT_PHONON_MAX_ATOMS = 64
 
 
 @dataclass(frozen=True)
@@ -39,6 +44,8 @@ class Settings:
     mace_download_timeout_s: float = 180.0
     mace_allow_download: bool = True
     mp_api_key: Optional[str] = None
+    max_atoms: int = DEFAULT_MAX_ATOMS
+    phonon_max_atoms: int = DEFAULT_PHONON_MAX_ATOMS
 
     def __post_init__(self) -> None:
         if self.dtype not in _VALID_DTYPES:
@@ -47,6 +54,10 @@ class Settings:
             raise ValueError(f"LATTICEFLOW_UMLIP must be one of {_VALID_UMLIP}, got {self.umlip!r}")
         if self.mace_download_timeout_s <= 0:
             raise ValueError("LATTICEFLOW_MACE_DOWNLOAD_TIMEOUT must be > 0")
+        if self.max_atoms < 1:
+            raise ValueError("LATTICEFLOW_MAX_ATOMS must be >= 1")
+        if self.phonon_max_atoms < 1:
+            raise ValueError("LATTICEFLOW_PHONON_MAX_ATOMS must be >= 1")
 
     @classmethod
     def from_env(cls, env: Optional[Mapping[str, str]] = None) -> "Settings":
@@ -64,6 +75,8 @@ class Settings:
             mace_download_timeout_s=float(get("LATTICEFLOW_MACE_DOWNLOAD_TIMEOUT", "180")),
             mace_allow_download=get("LATTICEFLOW_MACE_ALLOW_DOWNLOAD", "1").lower() in _TRUE,
             mp_api_key=env.get("MP_API_KEY") or None,
+            max_atoms=int(get("LATTICEFLOW_MAX_ATOMS", str(DEFAULT_MAX_ATOMS))),
+            phonon_max_atoms=int(get("LATTICEFLOW_PHONON_MAX_ATOMS", str(DEFAULT_PHONON_MAX_ATOMS))),
         )
 
 

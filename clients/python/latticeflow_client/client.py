@@ -22,6 +22,7 @@ import json
 import queue
 import threading
 import time
+import uuid
 from typing import Any, Callable, Dict, Iterable, List, Optional, Sequence, Tuple, Union
 
 import httpx
@@ -46,8 +47,9 @@ _CLOSED = object()
 class Reply:
     """Events received for one command (in wire order), keyed access by event type."""
 
-    def __init__(self, command: Optional[str]) -> None:
+    def __init__(self, command: Optional[str], request_id: Optional[str] = None) -> None:
         self.command = command
+        self.request_id = request_id
         self.events: List[Tuple[str, Dict[str, Any]]] = []
 
     def add(self, event: str, payload: Dict[str, Any]) -> None:
@@ -119,6 +121,10 @@ class Studio:
         self._send_lock = threading.Lock()
         self._state_lock = threading.Lock()
         self._closed_reason: Optional[str] = None
+        #: attach a ``request_id`` to every command (False = behave like a pre-Phase D client)
+        self.send_request_ids = True
+        #: the server echoes ``request_id`` (Phase D); learnt from the first echoed reply
+        self.server_echoes_request_ids = False
         #: latest active structure (CrystalStatePayload dict)
         self.crystal: Optional[Crystal] = None
         #: latest HISTORY_STATE payload (``entries`` = the whole undo history)
@@ -139,8 +145,14 @@ class Studio:
             return self
         self._inbox = queue.Queue()
         self._closed_reason = None
+        self.server_echoes_request_ids = False
         try:
-            # max_size=None: a phonon analysis of a 64-atom cell is several MB of JSON
+            # max_size=None: no client-side message size limit, on purpose. The server bounds what
+            # it sends (atom limits, HISTORY_LIMIT) and its largest replies are legitimately big:
+            # PHONON_ANALYSIS_COMPLETE of a large supercell (every eigenvector on the band path) or
+            # a top-k GENERATION_CANDIDATES easily exceed the websockets default of 1 MiB, which
+            # would close the session (1009 "message too big") in the middle of a run. The client
+            # only talks to a backend its user chose, so a limit would protect against nothing.
             self._ws = ws_connect(self.ws_url, open_timeout=open_timeout, max_size=None,
                                   ping_interval=20, ping_timeout=120)
             if hasattr(self._ws, "pending_legacy_warning"):   # websockets >= 17.1: we close it explicitly
@@ -182,6 +194,7 @@ class Studio:
                 try:
                     msg = json.loads(raw)
                     event, payload = str(msg["type"]), msg.get("payload") or {}
+                    rid = msg.get("request_id")
                 except (ValueError, KeyError, TypeError):
                     continue
                 self._track(event, payload)
@@ -190,7 +203,7 @@ class Studio:
                         self.on_event(event, payload)
                     except Exception:  # noqa: BLE001 - never kill the reader
                         pass
-                self._inbox.put((event, payload))
+                self._inbox.put((event, payload, rid if isinstance(rid, str) else None))
             self._closed_reason = "connection closed by the server"
         except ConnectionClosed as exc:
             self._closed_reason = f"connection closed: {exc}"
@@ -236,15 +249,26 @@ class Studio:
         body = {k: v for k, v in (payload or {}).items() if v is not None}
         with self._call_lock:
             self._drain()
-            self._send({"type": command, "payload": body})
-            reply = self._wait(command, spec, on_frame=on_frame, on_progress=on_progress,
+            rid = self._new_request_id()
+            message: Dict[str, Any] = {"type": command, "payload": body}
+            if rid is not None:
+                message["request_id"] = rid
+            self._send(message)
+            reply = self._wait(command, spec, request_id=rid, on_frame=on_frame, on_progress=on_progress,
                                timeout=self.timeout if timeout is None else timeout)
             self.last_reply = reply
             return reply
 
     def stop(self) -> None:
         """Cancel the running stream (``STOP_STREAM``); the waiting call raises :class:`StreamStopped`."""
-        self._send({"type": "STOP_STREAM", "payload": {}})
+        message: Dict[str, Any] = {"type": "STOP_STREAM", "payload": {}}
+        rid = self._new_request_id()
+        if rid is not None:
+            message["request_id"] = rid   # the stream's STREAM_STOPPED carries the *stream's* id
+        self._send(message)
+
+    def _new_request_id(self) -> Optional[str]:
+        return uuid.uuid4().hex if self.send_request_ids else None
 
     def _drain(self) -> None:
         """Drop already-tracked messages left over from earlier commands."""
@@ -257,51 +281,68 @@ class Studio:
                 self._inbox.put(_CLOSED)
                 return
 
-    def _wait(self, command: Optional[str], spec: P.CommandSpec, *, on_frame: Callback = None,
-              on_progress: Callback = None, timeout: Optional[float] = None) -> Reply:
-        reply = Reply(command)
+    def _wait(self, command: Optional[str], spec: P.CommandSpec, *, request_id: Optional[str] = None,
+              on_frame: Callback = None, on_progress: Callback = None,
+              timeout: Optional[float] = None) -> Reply:
+        reply = Reply(command, request_id)
         deadline = None if timeout is None else time.monotonic() + timeout
 
-        def next_item() -> Tuple[str, Dict[str, Any]]:
-            remaining = None if deadline is None else max(0.0, deadline - time.monotonic())
-            try:
-                item = self._inbox.get(timeout=remaining)
-            except queue.Empty:
-                raise StudioTimeout(command, timeout or 0.0) from None
-            if item is _CLOSED:
-                self._inbox.put(_CLOSED)
-                raise StudioConnectionError(self._closed_reason or "connection closed")
-            return item
+        def next_item() -> Tuple[str, Dict[str, Any], bool]:
+            """Next message that may belong to this command, and whether its request_id says so."""
+            while True:
+                remaining = None if deadline is None else max(0.0, deadline - time.monotonic())
+                try:
+                    item = self._inbox.get(timeout=remaining)
+                except queue.Empty:
+                    raise StudioTimeout(command, timeout or 0.0) from None
+                if item is _CLOSED:
+                    self._inbox.put(_CLOSED)
+                    raise StudioConnectionError(self._closed_reason or "connection closed")
+                event, payload, rid = item
+                if request_id is not None and rid == request_id:
+                    self.server_echoes_request_ids = True
+                    return event, payload, True
+                if rid is not None:
+                    continue      # caused by another (earlier) command
+                if request_id is not None and self.server_echoes_request_ids and event != P.ERROR:
+                    continue      # unsolicited (e.g. the connect-time load): not ours
+                return event, payload, False   # pre-Phase D server: ordering heuristics below
 
-        def fail(exc: StudioError) -> None:
-            # A stream that had already applied frames records "<label> (stopped|failed)" in the undo
+        def fail(exc: StudioError, payload: Dict[str, Any]) -> None:
+            # A stream that had changed the structure records "<label> (stopped|failed)" in the undo
             # history right after its STREAM_STOPPED / ERROR: consume that HISTORY_STATE first so
-            # `history` is current when the exception reaches the caller.
-            if applied and any(s.event == P.HISTORY_STATE for s in spec.steps):
+            # `history` is current when the exception reaches the caller. Phase D servers say so
+            # (`history_pushed`); for older ones infer it from "this command applied a frame".
+            if "history_pushed" in payload:
+                pushed = bool(payload["history_pushed"])
+            else:
+                pushed = applied and any(s.event == P.HISTORY_STATE for s in spec.steps)
+            if pushed:
                 while True:
-                    ev, pl = next_item()
+                    ev, pl, _ = next_item()
                     if ev == P.HISTORY_STATE:
                         reply.add(ev, pl)
                         break
             raise exc
 
         step = 0
-        applied = False   # this command has sent a structure-carrying frame
+        applied = False   # this command has sent a structure-carrying frame (pre-Phase D fallback)
         while step < len(spec.steps):
-            event, payload = next_item()
+            event, payload, ours = next_item()
             if event == P.ERROR:
-                if payload.get("command") in (command, None):
+                if ours or payload.get("command") in (command, None):
                     fail(StudioError(str(payload.get("code")), str(payload.get("message")),
-                                     command=payload.get("command"), reply=reply))
+                                     command=payload.get("command"), reply=reply,
+                                     after_terminal=bool(payload.get("after_terminal"))), payload)
                 continue
             if event == P.STREAM_STOPPED:
-                if spec.streaming and command is not None and payload.get("stopped") == command:
-                    fail(StreamStopped(command, reply))
+                if spec.streaming and command is not None and (ours or payload.get("stopped") == command):
+                    fail(StreamStopped(command, reply), payload)
                 continue
             if spec.streaming and event in P.CRYSTAL_EVENTS and event != P.SINGLE_POINT_UPDATE:
                 applied = True
             if event == P.PROGRESS:
-                if on_progress is not None and payload.get("command") == command:
+                if on_progress is not None and (ours or payload.get("command") == command):
                     on_progress(payload)
                 continue
             if spec.steps[step].matches(event, payload):
@@ -537,6 +578,11 @@ class Studio:
         return self.send_command("COMPUTE_FORMATION_ENERGY", {"bulk_position": bulk_position},
                                  on_progress=on_progress)[P.FORMATION_ENERGY_RESULT]
 
+    def history_entry(self, position: int) -> Dict[str, Any]:
+        """``REQUEST_HISTORY_ENTRY``: the stored structure of undo-history entry ``position`` (see
+        ``history["entries"]``) without changing the session -> ``{position, label, crystal}``."""
+        return self.send_command("REQUEST_HISTORY_ENTRY", {"position": int(position)})[P.HISTORY_ENTRY]
+
     def prototype_search(self, composition: Union[str, Dict[str, int]], *, on_progress: Callback = None,
                          timeout: Optional[float] = None, **opts: Any) -> Dict[str, Any]:
         """Ionic substitution into MP prototypes (max_candidates, probability_threshold, relax, with_e_hull)
@@ -600,9 +646,12 @@ class Studio:
         """``POST /api/mp/match``: Materials Project entries matching the structure."""
         return self._rest("POST", "/api/mp/match", json={"crystal": self._crystal_arg(crystal)}).json()
 
-    def compare(self, a: Crystal, b: Optional[Crystal] = None) -> Dict[str, Any]:
-        """``POST /api/compare`` of two payloads (``b`` defaults to the active structure)."""
-        return self._rest("POST", "/api/compare", json={"crystal_a": a, "crystal_b": self._crystal_arg(b)}).json()
+    def compare(self, a: Union[Crystal, int], b: Union[Crystal, int, None] = None) -> Dict[str, Any]:
+        """``POST /api/compare`` of two structures, each a payload or an undo-history position
+        (fetched with :meth:`history_entry`); ``b`` defaults to the active structure."""
+        a = self.history_entry(a)["crystal"] if isinstance(a, int) else a
+        b = self.history_entry(b)["crystal"] if isinstance(b, int) else self._crystal_arg(b)
+        return self._rest("POST", "/api/compare", json={"crystal_a": a, "crystal_b": b}).json()
 
     def ordering(self, cif: str, **opts: Any) -> Dict[str, Any]:
         """``POST /api/ordering``: ordered approximants of a disordered CIF, ranked by energy."""

@@ -71,6 +71,30 @@ def test_stop_stream(studio):
     assert studio.history["label"].endswith("(stopped)")
 
 
+def test_request_ids_history_entry_and_compare_by_position(studio):
+    studio.load(preset="si")
+    entry = studio.history_entry(0)
+    assert entry["position"] == 0 and entry["crystal"]["formula"] == "SrTiO3"
+    assert studio.server_echoes_request_ids and studio.last_reply.request_id
+    assert studio.history["position"] == 1          # fetching an entry changes nothing
+    cmp = studio.compare(0, 1)
+    assert cmp == studio.compare(entry["crystal"])
+    with pytest.raises(StudioError) as err:
+        studio.history_entry(99)
+    assert err.value.code == "INDEX_OUT_OF_RANGE"
+
+
+def test_fallback_without_request_ids(server_url):
+    # a client that sends no request_id gets none back: the ordering heuristics still work
+    with Studio(server_url, timeout=120) as s:
+        s.send_request_ids = False
+        s.load(preset="si")
+        with pytest.raises(StreamStopped):
+            s.md(temperature_k=300, n_steps=100000, frame_interval=1, seed=1, on_frame=lambda f: s.stop())
+        assert s.history["label"].endswith("(stopped)")
+        assert s.relax(fmax=0.05, max_steps=60)["final"] and not s.server_echoes_request_ids
+
+
 def test_rest(studio):
     health = studio.health()
     assert health["umlip_backend"] == "lj-fallback" and health["hull_available"] is False

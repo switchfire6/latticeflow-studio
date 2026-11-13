@@ -462,9 +462,9 @@ def test_malformed_messages_never_close_the_socket(studio):
     studio.expect_error("INVALID_PAYLOAD", "REQUEST_EIGENMODE")
     # A null payload is accepted as {} and binary JSON frames work too.
     studio.ws.send_json({"type": "STOP_STREAM", "payload": None})
-    assert studio.expect("STREAM_STOPPED") == {"stopped": None}
+    assert studio.expect("STREAM_STOPPED")["stopped"] is None
     studio.ws.send_json({"type": "STOP_STREAM", "payload": {}}, mode="binary")
-    assert studio.expect("STREAM_STOPPED") == {"stopped": None}
+    assert studio.expect("STREAM_STOPPED")["stopped"] is None
     studio.probe(studio.initial)
 
 
@@ -540,7 +540,7 @@ def test_relaxation_round_trip(studio):
     assert_same_structure(frames[0]["payload"]["crystal"], start)
     studio.assert_silent()
     studio.send("STOP_STREAM")  # nothing running any more
-    assert studio.expect("STREAM_STOPPED") == {"stopped": None}
+    assert studio.expect("STREAM_STOPPED")["stopped"] is None
     studio.probe(last["crystal"])
 
 
@@ -577,7 +577,7 @@ def test_stop_mid_relaxation(slow_studio):
     slow_studio.send("STOP_STREAM")
     messages = slow_studio.until({"STREAM_STOPPED"})
     latency = time.perf_counter() - t0
-    assert messages[-1]["payload"] == {"stopped": "START_RELAXATION"}
+    assert messages[-1]["payload"]["stopped"] == "START_RELAXATION"
     frames += messages[:-1]
     assert set(_types(frames)) == {"RELAXATION_FRAME"}
     _check_relaxation_frames(frames, complete=False)
@@ -586,7 +586,7 @@ def test_stop_mid_relaxation(slow_studio):
     assert latency < STOP_LATENCY_BOUND_S
     slow_studio.probe(frames[-1]["payload"]["crystal"])
     slow_studio.send("STOP_STREAM")
-    assert slow_studio.expect("STREAM_STOPPED") == {"stopped": None}
+    assert slow_studio.expect("STREAM_STOPPED")["stopped"] is None
 
 
 def test_stop_immediately_after_start_stops_that_stream(slow_studio):
@@ -594,7 +594,7 @@ def test_stop_immediately_after_start_stops_that_stream(slow_studio):
     slow_studio.send("START_RELAXATION", {"fmax": 1e-6, "max_steps": 2000})
     slow_studio.send("STOP_STREAM")
     messages = slow_studio.until({"STREAM_STOPPED"})
-    assert messages[-1]["payload"] == {"stopped": "START_RELAXATION"}
+    assert messages[-1]["payload"]["stopped"] == "START_RELAXATION"
     frames = messages[:-1]
     assert set(_types(frames)) <= {"RELAXATION_FRAME"}
     slow_studio.assert_silent(0.5)
@@ -645,7 +645,7 @@ def test_stop_mid_flow(slow_engine, slow_studio):
     slow_studio.send("STOP_STREAM")
     messages = slow_studio.until({"STREAM_STOPPED"})
     latency = time.perf_counter() - t0
-    assert messages[-1]["payload"] == {"stopped": "START_FLOW_GENERATION"}
+    assert messages[-1]["payload"]["stopped"] == "START_FLOW_GENERATION"
     frames += messages[:-1]
     assert set(_types(frames)) == {"FLOW_TRAJECTORY_FRAME"}
     assert [f["payload"]["step"] for f in frames] == list(range(1, len(frames) + 1))
@@ -748,7 +748,7 @@ def test_stop_mid_phonon_latency(studio):
     studio.send("STOP_STREAM")
     messages = studio.until({"STREAM_STOPPED"}, max_messages=1)
     latency = time.perf_counter() - t0
-    assert messages[-1]["payload"] == {"stopped": "RUN_PHONON_SHAKE_TEST"}
+    assert messages[-1]["payload"]["stopped"] == "RUN_PHONON_SHAKE_TEST"
     studio.assert_silent(0.3)
     t1 = time.perf_counter()
     studio.probe(reference)  # waits for the worker to reach its next checkpoint
@@ -768,7 +768,7 @@ def test_new_stream_implicitly_cancels_old(slow_studio):
     first = slow_studio.until({"RELAXATION_FRAME"}, max_messages=1)
     slow_studio.send("START_RELAXATION", {"fmax": 1e-6, "max_steps": 3})
     messages = slow_studio.until({"STREAM_STOPPED"})
-    assert messages[-1]["payload"] == {"stopped": "START_RELAXATION"}
+    assert messages[-1]["payload"]["stopped"] == "START_RELAXATION"
     old = first + messages[:-1]
     _check_relaxation_frames(old, complete=False)
     new = _until_final(slow_studio)
@@ -781,7 +781,7 @@ def test_new_stream_implicitly_cancels_old(slow_studio):
     frames = slow_studio.until({"RELAXATION_FRAME"}, max_messages=1)
     slow_studio.send("RUN_PHONON_SHAKE_TEST", {})
     messages = slow_studio.until({"STREAM_STOPPED"})
-    assert messages[-1]["payload"] == {"stopped": "START_RELAXATION"}
+    assert messages[-1]["payload"]["stopped"] == "START_RELAXATION"
     frames += messages[:-1]
     slow_studio.expect("PHONON_ANALYSIS_COMPLETE", timeout=60.0)
     flagged = slow_studio.expect("SINGLE_POINT_UPDATE")["crystal"]
@@ -795,7 +795,7 @@ def test_instant_command_implicitly_cancels_stream(slow_studio):
     frames = [slow_studio.until({"RELAXATION_FRAME"}, max_messages=1)[0] for _ in range(2)]
     slow_studio.send("DELETE_ATOM", {"atom_index": 0})
     messages = slow_studio.until({"STREAM_STOPPED"})
-    assert messages[-1]["payload"] == {"stopped": "START_RELAXATION"}
+    assert messages[-1]["payload"]["stopped"] == "START_RELAXATION"
     frames += messages[:-1]
     _check_relaxation_frames(frames, complete=False)
     after = slow_studio.expect("SINGLE_POINT_UPDATE")["crystal"]
@@ -899,7 +899,7 @@ def test_stop_mid_follow(slow_studio):
     frames = [slow_studio.until({"RELAXATION_FRAME"}, max_messages=1)[0] for _ in range(2)]
     slow_studio.send("STOP_STREAM")
     messages = slow_studio.until({"STREAM_STOPPED"})
-    assert messages[-1]["payload"] == {"stopped": "FOLLOW_INSTABILITY"}
+    assert messages[-1]["payload"]["stopped"] == "FOLLOW_INSTABILITY"
     frames += messages[:-1]
     _check_relaxation_frames(frames, complete=False)
     slow_studio.assert_silent(0.3)

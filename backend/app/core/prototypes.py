@@ -186,7 +186,7 @@ def search(
     from pymatgen.io.ase import AseAtomsAdaptor
 
     from app.core.relaxer import RelaxationDivergedError, iter_relaxation
-    from app.core.structure_io import MAX_ATOMS
+    from app.core.structure_io import max_atoms as _studio_max_atoms
 
     def check() -> None:
         if should_cancel is not None and should_cancel():
@@ -234,7 +234,7 @@ def search(
                 new = _substitute(structure, detail)
             except KeyError:
                 continue
-            if new.composition.reduced_formula != target_formula or len(new) > MAX_ATOMS:
+            if new.composition.reduced_formula != target_formula or len(new) > _studio_max_atoms():
                 continue
             if any(matcher.fit(new, other[0]) for other in pool):
                 continue

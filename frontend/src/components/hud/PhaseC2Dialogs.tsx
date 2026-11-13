@@ -6,7 +6,7 @@
  *               phonon DOS or lowest branch when both have phonons cached.
  *               Structures come from the snapshot cache (services/snapshotCache.ts):
  *               the current structure, the Follow-Instability parent and every
- *               history entry whose payload was seen while it was active.
+ *               history entry (uncached ones fetched with REQUEST_HISTORY_ENTRY).
  *   prototype   PROTOTYPE_SEARCH (ionic substitution into MP prototypes) with
  *               PROGRESS and the ranked PROTOTYPE_CANDIDATES; Load = LOAD_STRUCTURE {crystal}.
  * Plus the Structure card's "Match to Materials Project" (POST /api/mp/match)
@@ -15,7 +15,7 @@
 import { Database, Loader2, Search, Square } from "lucide-react";
 import { useEffect, useState } from "react";
 import { ApiError, api } from "../../services/apiClient";
-import { compareOptions, phononOf } from "../../services/compareActions";
+import { compareOptions, fetchEntry, phononOf } from "../../services/compareActions";
 import { MP_KEY_HINT, mpErrorView, type MpErrorView } from "../../services/mpActions";
 import { useSnapshotVersion, type PhononSnapshot, type Snapshot } from "../../services/snapshotCache";
 import { commands } from "../../services/wsClient";
@@ -43,7 +43,25 @@ function SidePicker({ label, color, value, onChange }: { label: string; color: s
   useSnapshotVersion((s) => s.v);
   useCrystalStore((s) => s.history);
   const opts = compareOptions();
-  const selectedId = value ? (opts.find((o) => o.snapshot.key === value.key && sameStructure(o.snapshot.crystal, value.crystal))?.id ?? "__kept") : "";
+  // An uncached history entry picked by the user: fetched, then selected once it lands in the cache.
+  const [pending, setPending] = useState<string | null>(null);
+  const pendingOpt = pending ? opts.find((o) => o.id === pending) : undefined;
+  useEffect(() => {
+    if (pending && pendingOpt?.snapshot) {
+      setPending(null);
+      onChange(pendingOpt.snapshot);
+    } else if (pending && !pendingOpt) setPending(null); // the entry left the history
+  }, [pending, pendingOpt, onChange]);
+  const pick = (id: string) => {
+    if (id === "__kept") return onChange(value);
+    const o = opts.find((x) => x.id === id);
+    if (o?.snapshot || !o?.entry) {
+      setPending(null);
+      return onChange(o?.snapshot ?? null);
+    }
+    if (fetchEntry(o.entry.position)) setPending(o.id);
+  };
+  const selectedId = pending ?? (value ? (opts.find((o) => o.snapshot && o.snapshot.key === value.key && sameStructure(o.snapshot.crystal, value.crystal))?.id ?? "__kept") : "");
   return (
     <label className="block min-w-0 flex-1">
       <div className="mb-0.5 flex items-center gap-1 text-[10px] text-slate-500">
@@ -52,7 +70,7 @@ function SidePicker({ label, color, value, onChange }: { label: string; color: s
       <select
         className={inputCls}
         value={selectedId}
-        onChange={(e) => onChange(e.target.value === "__kept" ? value : (opts.find((o) => o.id === e.target.value)?.snapshot ?? null))}
+        onChange={(e) => pick(e.target.value)}
         data-compare-side={label}
       >
         <option value="">choose a structure…</option>
@@ -60,6 +78,7 @@ function SidePicker({ label, color, value, onChange }: { label: string; color: s
         {opts.map((o) => (
           <option key={o.id} value={o.id}>
             {o.label}
+            {o.id === pending ? " (loading…)" : ""}
           </option>
         ))}
       </select>
@@ -168,7 +187,7 @@ export function CompareDialog() {
           <SidePicker label="B" color={COLOR_B} value={b} onChange={(s) => useUi.getState().setCompare({ b: s })} />
         </div>
         <p className="text-[10px] leading-snug text-slate-500">
-          History entries are listed once their structure has been seen in this session (the server only sends the active structure). ΔE assumes both energies come from the same model.
+          Every history entry can be picked (structures not seen yet are fetched from the server). ΔE assumes both energies come from the same model.
         </p>
         {state.status === "busy" && <ProgressBar message="comparing (StructureMatcher, symmetry)…" />}
         {state.status === "error" && <p className="text-[10.5px] text-rose-300">{state.error}</p>}

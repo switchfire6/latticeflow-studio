@@ -137,6 +137,8 @@ def test_health(client, engine, hull_ctx):
         "dtype": "float64",
         "load_error": None,
         "hull_available": False,
+        "max_atoms": 128,
+        "phonon_max_atoms": 64,
     }
     hull_ctx.api_key = VALID_KEY
     assert client.get("/api/health").json()["hull_available"] is True

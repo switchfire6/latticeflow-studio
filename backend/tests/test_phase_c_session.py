@@ -73,7 +73,7 @@ def test_md_stop_and_divergence(slow_mstudio):
     s.send("STOP_STREAM")
     msgs = s.until(["STREAM_STOPPED"])
     last = [m["payload"] for m in msgs if m["type"] == "MD_FRAME"] or [first]
-    assert msgs[-1]["payload"] == {"stopped": "START_MD"}
+    assert msgs[-1]["payload"]["stopped"] == "START_MD"
     assert s.history()["label"] == "MD 300 K NVT (stopped)"
     _active_equals(s, last[-1]["crystal"])  # the last frame sent is the active structure
 

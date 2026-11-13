@@ -44,7 +44,7 @@ from ase import Atoms
 from ase.data import atomic_numbers
 
 from app.core.geometry_analysis import get_spacegroup, symmetry_dataset
-from app.core.structure_io import MAX_ATOMS, StructureIOError, atoms_to_cif, structure_from_cif
+from app.core.structure_io import max_atoms as _studio_max_atoms, StructureIOError, atoms_to_cif, structure_from_cif
 from app.schemas.api import OrderingCandidate, OrderingResponse
 from app.schemas.messages import SubstitutionResult
 
@@ -314,7 +314,7 @@ def order_disordered(cif_text: str, engine, *, max_atoms: int = 64, n_candidates
     Raises :class:`StructureIOError` (INVALID_STRUCTURE for parse errors, STRUCTURE_TOO_LARGE).
     """
     structure = structure_from_cif(cif_text)
-    max_atoms = min(int(max_atoms), MAX_ATOMS)
+    max_atoms = min(int(max_atoms), _studio_max_atoms())
     dis_formula = structure.composition.reduced_formula
     if structure.is_ordered:
         atoms = _to_atoms(structure)

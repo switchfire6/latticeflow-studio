@@ -1,11 +1,18 @@
 """Terminal-message table of the ``/ws/studio`` protocol.
 
-Every message is an envelope ``{"type": ..., "payload": {...}}``. The protocol has
-no request ids: a command is answered, in wire order, by a fixed sequence of
-events (``backend/app/schemas/messages.py`` docstrings, ``backend/app/api/ws_stream.py``).
+Every message is an envelope ``{"type": ..., "payload": {...}, "request_id": ...}``.
+A command is answered, in wire order, by a fixed sequence of events
+(``backend/app/schemas/messages.py`` docstrings, ``backend/app/api/ws_stream.py``).
 :class:`CommandSpec` records that sequence; the client waits until it has seen
 every step in order, skipping anything else (intermediate frames, ``PROGRESS``,
-stale messages of earlier commands, unknown events).
+unknown events).
+
+Since Phase D the client sends a unique ``request_id`` with every command and the
+server echoes it on every message that command causes, so stale messages of
+earlier commands are recognised by id. Servers that do not echo it (pre-Phase D)
+are handled by the ordering heuristics alone (``ERROR.command`` /
+``STREAM_STOPPED.stopped`` matching, "a stream that applied frames pushes a
+trailing ``HISTORY_STATE``").
 
 Adding a command = one entry in :data:`COMMANDS` (and, optionally, a convenience
 method on :class:`latticeflow_client.Studio`); :meth:`Studio.send_command` works
@@ -44,6 +51,7 @@ MD_COMPLETE = "MD_COMPLETE"
 COMMITTEE_RESULT = "COMMITTEE_RESULT"
 GENERATION_CANDIDATES = "GENERATION_CANDIDATES"
 PROTOTYPE_CANDIDATES = "PROTOTYPE_CANDIDATES"
+HISTORY_ENTRY = "HISTORY_ENTRY"
 
 #: events that carry a ``crystal`` the session just made active
 CRYSTAL_EVENTS = (SINGLE_POINT_UPDATE, CRYSTAL_STATE_FINAL, RELAXATION_FRAME, FLOW_TRAJECTORY_FRAME, MD_FRAME)
@@ -112,6 +120,8 @@ COMMANDS: Dict[str, CommandSpec] = {
     "COMMITTEE_EVALUATE": _spec(COMMITTEE_RESULT, streaming=True),
     # ---- Phase C2
     "PROTOTYPE_SEARCH": _spec(PROTOTYPE_CANDIDATES, streaming=True),
+    # ---- Phase D
+    "REQUEST_HISTORY_ENTRY": _spec(HISTORY_ENTRY),
 }
 
 #: PERTURB_OR_TRANSMUTE_ATOM with auto_relax=true: the commit, then a relaxation stream

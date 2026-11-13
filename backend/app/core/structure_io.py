@@ -29,12 +29,26 @@ import numpy as np
 from ase import Atoms
 from ase.io import write as ase_write
 
+from app import config as _config
 from app.schemas.crystal import CrystalStatePayload
 
 # Interactive limit for any structure loaded into the studio (MACE single
 # points stay well under the latency target below this). Phonon analysis has
-# its own, tighter limit in the WebSocket layer.
-MAX_ATOMS = 128
+# its own, tighter limit in the WebSocket layer. Configurable (Phase D, §7.7):
+# ``LATTICEFLOW_MAX_ATOMS``; read it at call time with :func:`max_atoms`.
+DEFAULT_MAX_ATOMS = _config.DEFAULT_MAX_ATOMS
+
+
+def max_atoms() -> int:
+    """The studio-wide atoms-per-structure limit (``Settings.max_atoms``, default 128)."""
+    try:
+        return int(_config.get_settings().max_atoms)
+    except ValueError:  # malformed environment: fall back to the default
+        return DEFAULT_MAX_ATOMS
+
+
+#: Import-time alias of :func:`max_atoms` (kept for existing ``from ... import MAX_ATOMS``).
+MAX_ATOMS = max_atoms()
 
 
 class StructureIOError(ValueError):
@@ -52,9 +66,10 @@ def _finalize(atoms: Atoms) -> Atoms:
     n = len(atoms)
     if n == 0:
         raise StructureIOError("structure contains no atoms")
-    if n > MAX_ATOMS:
+    limit = max_atoms()
+    if n > limit:
         raise StructureIOError(
-            f"structure has {n} atoms; the studio limit is {MAX_ATOMS}", code="STRUCTURE_TOO_LARGE"
+            f"structure has {n} atoms; the studio limit is {limit}", code="STRUCTURE_TOO_LARGE"
         )
     cell = np.asarray(atoms.cell.array, dtype=float)
     if not np.all(np.isfinite(cell)) or abs(np.linalg.det(cell)) < 1e-6:

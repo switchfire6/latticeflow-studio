@@ -49,6 +49,7 @@ import type {
 import { registerDefaultSend } from "./phononActions";
 import { SessionMemory } from "./sessionMemory";
 import { snapshots } from "./snapshotCache";
+import { studioLimits, type StudioLimits } from "../utils/limits";
 import { historySteps } from "../utils/analysisC";
 import { downloadText } from "../utils/download";
 
@@ -80,6 +81,7 @@ const SERVER_EVENTS: ReadonlySet<string> = new Set<ServerEvent>([
   "COMMITTEE_RESULT",
   "GENERATION_CANDIDATES",
   "PROTOTYPE_CANDIDATES",
+  "HISTORY_ENTRY",
 ]);
 
 const STREAM_COMMANDS: ReadonlySet<ClientCommand> = new Set<ClientCommand>([
@@ -144,8 +146,13 @@ function errorTitle(code: string): string {
     .join(" ");
 }
 
+/** ERROR after the stream's terminal frame (Phase D `after_terminal`; older servers: by code). */
+export function isPostTerminalError(p: ErrorPayload): boolean {
+  return p.after_terminal ?? POST_TERMINAL_ERRORS.has(p.code);
+}
+
 /** User-facing title and message for an ERROR event (with actionable hints for the phonon workflow). */
-export function describeError(p: ErrorPayload): { title: string; message: string; level?: ToastLevel } {
+export function describeError(p: ErrorPayload, limits: StudioLimits = studioLimits(null)): { title: string; message: string; level?: ToastLevel } {
   const detail = p.message ? ` (${p.message})` : "";
   if ((p.command === "UNDO" || p.command === "REDO") && p.code === "INVALID_OPERATION") {
     return { title: p.command === "UNDO" ? "Nothing to undo" : "Nothing to redo", message: p.message || "The history is at its end.", level: "info" };
@@ -192,7 +199,7 @@ export function describeError(p: ErrorPayload): { title: string; message: string
       case "STRUCTURE_TOO_LARGE":
         return {
           title: "Supercell too large",
-          message: `The supercell commensurate with this q-point exceeds the 128-atom studio limit. Pick Γ or a point with a smaller supercell${detail}.`,
+          message: `The supercell commensurate with this q-point exceeds the ${limits.maxAtoms}-atom studio limit. Pick Γ or a point with a smaller supercell${detail}.`,
         };
       case "MODE_NOT_IMAGINARY":
         return { title: "Mode is not imaginary", message: `Only imaginary modes (f < 0) can be followed${detail}.` };
@@ -231,8 +238,9 @@ export function describeError(p: ErrorPayload): { title: string; message: string
     };
   }
   if (p.command === "RUN_PHONON_SHAKE_TEST" && p.code === "STRUCTURE_TOO_LARGE") {
-    return { title: "Structure too large for phonons", message: `The shake-test supports at most 64 atoms per cell${detail}.` };
+    return { title: "Structure too large for phonons", message: `The shake-test supports at most ${limits.phononMaxAtoms} atoms per cell${detail}.` };
   }
+  if (p.command === "REQUEST_HISTORY_ENTRY") return { title: "History entry unavailable", message: p.message, level: "warning" };
   return { title: errorTitle(p.code), message: p.message };
 }
 
@@ -421,6 +429,10 @@ export function dispatchServerMessage(store: CrystalStore, msg: ServerMessage): 
       return;
     }
 
+    case "HISTORY_ENTRY":
+      // Phase D: consumed by the compare-mode snapshot cache (services/snapshotCache.ts).
+      return;
+
     case "PROTOTYPE_CANDIDATES": {
       s.setPrototypeSearch({ status: "done", result: msg.payload, error: null });
       s.clearProgress("PROTOTYPE_SEARCH");
@@ -501,7 +513,7 @@ export function dispatchServerMessage(store: CrystalStore, msg: ServerMessage): 
     case "ERROR": {
       const p = msg.payload;
       s.setLastError(p);
-      const { title, message, level } = describeError(p);
+      const { title, message, level } = describeError(p, studioLimits(s.health));
       const disordered = p.command === "LOAD_STRUCTURE" && p.code === "DISORDERED_STRUCTURE" && !!session.lastLoadText;
       if (disordered) s.setDisordered({ cif: session.lastLoadText!, message: p.message });
       s.pushToast(level ?? "error", title, message, disordered ? { kind: "find-orderings", label: "Find ordered approximants" } : undefined);
@@ -512,11 +524,12 @@ export function dispatchServerMessage(store: CrystalStore, msg: ServerMessage): 
       if (p.command === "REQUEST_PHONON_DOS") s.setDosPending(false);
       if (p.command === "EXPORT_PHONON_DATA") s.setPhononExportPending(false);
       if (p.command === "CHECK_PHONON_CONVERGENCE") session.convergenceArrived = false;
-      if (p.command && !POST_TERMINAL_ERRORS.has(p.code)) s.clearProgress(p.command);
+      const postTerminal = isPostTerminalError(p);
+      if (p.command && !postTerminal) s.clearProgress(p.command);
       if (p.command === "FOLLOW_INSTABILITY" && s.followResult && (s.followResult.status === "running" || p.code === "RELAXATION_DIVERGED")) {
         s.setFollowResult({ ...s.followResult, status: "failed" });
       }
-      if (p.command && STREAM_COMMANDS.has(p.command) && !POST_TERMINAL_ERRORS.has(p.code)) {
+      if (p.command && STREAM_COMMANDS.has(p.command) && !postTerminal) {
         s.endStream({ command: p.command, fromBack: true });
       }
       return;
@@ -987,6 +1000,9 @@ export const commands = {
   /** LOAD_STRUCTURE {crystal} (a generation / prototype candidate). */
   loadCrystal: (crystal: CrystalStatePayload) => sendOrToast("LOAD_STRUCTURE", { crystal }),
   prototypeSearch: (p: ClientCommandMap["PROTOTYPE_SEARCH"]) => sendOrToast("PROTOTYPE_SEARCH", p),
+  // ---- Phase D
+  /** REQUEST_HISTORY_ENTRY: fetch a history entry's structure into the compare cache (changes nothing). */
+  requestHistoryEntry: (position: number) => sendOrToast("REQUEST_HISTORY_ENTRY", { position }),
   /** Walk the history to `target` with repeated UNDO / REDO (there is no GOTO command). */
   gotoHistory: (target: number) => {
     const h = studio.store.getState().history;

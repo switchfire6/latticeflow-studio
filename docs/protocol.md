@@ -12,25 +12,34 @@ Field-level detail lives in those files, and in `PROJECT_SPEC.md` §5 and §10. 
 ## 1. Session model
 
 - **One connection is one session.** Each session has its own active structure, its own undo history (at most 50 entries), its own force field and its own phonon cache. The browser UI and a Python client on the same backend do not share a session.
-- **Envelope.** Every message is `{"type": "<TYPE>", "payload": {...}}`. Payloads are validated with pydantic, so omitted fields take their schema defaults.
+- **Envelope.** Every message is `{"type": "<TYPE>", "payload": {...}}`, plus an optional client-chosen `"request_id"` (string, ≤ 64 characters). Payloads are validated with pydantic, so omitted fields take their schema defaults.
 - **Connect.** On connect the server loads the `srtio3` preset and sends `SINGLE_POINT_UPDATE` followed by `HISTORY_STATE` (label "Load preset srtio3").
-- **Ordering.** Commands are processed in the order they are sent, and replies come back in that order. Messages carry no request ids, so a reply is matched to its command by that order and by the `command` field of `ERROR`, `PROGRESS` and `STREAM_STOPPED`.
+- **Ordering.** Commands are processed in the order they are sent, and replies come back in that order.
+- **Request ids.** A command sent with `request_id` gets that id back as a top-level `"request_id"` on every server message it causes:
+  - its replies, stream frames, `PROGRESS` and terminal messages;
+  - the `HISTORY_STATE` it pushes and its `ERROR` (including `INVALID_PAYLOAD` / `UNKNOWN_COMMAND`, and `INVALID_MESSAGE` when the id itself could be read);
+  - the `STREAM_STOPPED` of its own stream, even when a later command (with a different id, or none) cancelled it, and the "… (stopped)" `HISTORY_STATE` after it.
+
+  `STOP_STREAM`'s own id appears only on `STREAM_STOPPED {stopped: null}`. Messages with no originating request (the connect-time preset load) carry no id. Coalesced drag frames are never answered, so their ids never appear. Without ids, match replies by order and by the `command` field of `ERROR`, `PROGRESS` and `STREAM_STOPPED`.
 - **Streams.** At most one stream runs at a time. Starting a stream, or sending a state-changing instant command, first cancels the running stream. The cancelled stream's `STREAM_STOPPED {stopped: "<old command>"}` comes before the new reply. `STOP_STREAM` with nothing running answers `STREAM_STOPPED {stopped: null}`.
 - **One terminal group per stream.** Every stream ends with exactly one terminal group, and nothing from that job follows it. The group is one of:
   - the success group listed below;
   - `STREAM_STOPPED`;
   - `ERROR`.
 
-  When a stream is stopped or fails after it has already applied frames, the last frame stays active. In that case a `HISTORY_STATE` ("… (stopped)" or "… (failed)") follows the `STREAM_STOPPED` / `ERROR`.
+  When a stream is stopped or fails after it has already applied frames, the last frame stays active. In that case a `HISTORY_STATE` ("… (stopped)" or "… (failed)") follows the `STREAM_STOPPED` / `ERROR`, and that message has `history_pushed: true`, so a client knows whether to wait for it. An `ERROR` with `after_terminal: true` follows the stream's own terminal frame (e.g. `RELAXATION_DIVERGED` after the final `RELAXATION_FRAME`); the stream is over either way.
 - **Phonon cache.** Any state change invalidates the phonon cache. After that, `REQUEST_EIGENMODE`, `FOLLOW_INSTABILITY`, `REQUEST_PHONON_DOS`, `CHECK_PHONON_CONVERGENCE` and `EXPORT_PHONON_DATA` answer `ERROR NO_PHONON_ANALYSIS`.
 - **Limits.**
 
   | Limit | Value |
   |---|---|
-  | Atoms per structure | 128 (`MAX_ATOMS`) |
-  | Atoms per phonon cell | 64 |
+  | Atoms per structure | 128 (`LATTICEFLOW_MAX_ATOMS`) |
+  | Atoms per phonon cell | 64 (`LATTICEFLOW_PHONON_MAX_ATOMS`) |
   | Atoms per phonon supercell | 600 |
   | Elements | Z ≤ 89 |
+
+  The first two are configurable and reported by `GET /api/health` (`max_atoms`, `phonon_max_atoms`).
+- **Message size.** Some messages are large: `PHONON_ANALYSIS_COMPLETE` of a 64-atom cell is several MB. Many WebSocket clients cap incoming messages at 1 MB (Python `websockets` by default), so disable or raise the client's maximum message size (`websockets.connect(..., max_size=None)`).
 
 - **Errors.** `ERROR {code, message, command}` leaves the connection open. The codes are the `ErrorCode` enum (§4).
 
@@ -50,6 +59,7 @@ Field-level detail lives in those files, and in `PROJECT_SPEC.md` §5 and §10. 
 | `MAKE_SUPERCELL` | I (sc) | `matrix` 3×3 int, det > 0 | `SINGLE_POINT_UPDATE`, `HISTORY_STATE` |
 | `REFINE_STRUCTURE` | I (sc) | `symprec=0.01`, `cell=refined`/`conventional`/`primitive` | `SINGLE_POINT_UPDATE`, `HISTORY_STATE` |
 | `UNDO` / `REDO` | I (sc) | – | `SINGLE_POINT_UPDATE`, `HISTORY_STATE` (`INVALID_OPERATION` at either end) |
+| `REQUEST_HISTORY_ENTRY` | I | `position` | `HISTORY_ENTRY {position, label, crystal}` (the stored structure; changes nothing, cancels nothing; `INDEX_OUT_OF_RANGE`) |
 | `REQUEST_EIGENMODE` | I | `q_index`, `band_index` | `EIGENMODE_DATA {eigenmode}` |
 | `REQUEST_PHONON_DOS` | I | `mesh?`, `t_min=0`, `t_max=1000`, `t_step=10` | `PHONON_DOS_DATA` |
 | `EXPORT_PHONON_DATA` | I | – | `PHONON_EXPORT {filename, phonopy_yaml}` |
@@ -57,7 +67,7 @@ Field-level detail lives in those files, and in `PROJECT_SPEC.md` §5 and §10. 
 | `REQUEST_LOCAL_ANALYSIS` | I | `include_partial_rdf=true` | `LOCAL_ANALYSIS_DATA` |
 | `START_RELAXATION` | S (sc) | `fmax=0.02`, `max_steps=100`, `relax_cell=true`, `fix_symmetry=false`, `pressure_gpa=0`, `stress_tol_gpa?`, `optimizer=FIRE`/`BFGS`/`LBFGS` | `RELAXATION_FRAME`… ending with `final=true`, then `HISTORY_STATE`. Divergence: final frame, `ERROR RELAXATION_DIVERGED`, `HISTORY_STATE` |
 | `FOLLOW_INSTABILITY` | S (sc) | `q_index`, `band_index`, `amplitude=0.1` Å, `fmax=0.02`, `max_steps=200` | same as `START_RELAXATION`; the commensurate supercell becomes active (`MODE_NOT_IMAGINARY`, `NO_PHONON_ANALYSIS`, `STRUCTURE_TOO_LARGE`) |
-| `START_FLOW_GENERATION` | S (sc) | `elements`, `num_atoms=12`, `composition?` (atoms per cell), `target_spacegroup?`, `target_crystal_system?`, `target_bulk_modulus_gpa?`, `steps=60`, `physics_guidance_scale=1.5`, `seed?`, `top_k=1` | `FLOW_TRAJECTORY_FRAME`…, then [`GENERATION_CANDIDATES` if `top_k > 1`], `CRYSTAL_STATE_FINAL`, `HISTORY_STATE`. Rank 1 is the active endpoint; load the other candidates with `LOAD_STRUCTURE {crystal}` |
+| `START_FLOW_GENERATION` | S (sc) | `elements`, `num_atoms=12`, `composition?` (atoms per cell), `target_spacegroup?`, `target_crystal_system?`, `target_bulk_modulus_gpa?`, `steps=60`, `physics_guidance_scale=1.5`, `seed?`, `top_k=1` | `FLOW_TRAJECTORY_FRAME`…, then [`GENERATION_CANDIDATES` if `top_k > 1`], `CRYSTAL_STATE_FINAL`, `HISTORY_STATE`. Rank 1 is the active endpoint; load the other candidates with `LOAD_STRUCTURE {crystal}`. A `composition` that does not fit the target group is scaled ×2, ×3, ×4 (within the atom limit) before `GENERATION_FAILED`, e.g. NaCl in #225 becomes Na4Cl4 |
 | `RUN_PHONON_SHAKE_TEST` | S | `supercell_dim=[2,2,2]`, `displacement_distance=0.01`, `cell_mode=as_displayed`/`primitive`, `min_supercell_length?` (overrides `supercell_dim`) | `PHONON_ANALYSIS_COMPLETE`, then a `SINGLE_POINT_UPDATE` that flags the atoms and bonds of the softest mode (no new energy evaluation, no history entry) |
 | `CHECK_PHONON_CONVERGENCE` | S | `supercell_dim?` (default: current + 1 on every axis, ≤ 600 atoms) | `PHONON_CONVERGENCE_RESULT`, `PHONON_ANALYSIS_COMPLETE` (replaces the cache), flagging `SINGLE_POINT_UPDATE` |
 | `COMPUTE_ELASTIC_TENSOR` | S | `max_strain=0.01`, `n_strains=4`, `relax_ions=true`, `fmax=0.01` | `ELASTIC_TENSOR_RESULT` |
@@ -80,6 +90,7 @@ Notes:
 | Event | Payload | Notes |
 |---|---|---|
 | `SINGLE_POINT_UPDATE` | `{crystal}` | new active structure (or phonon flags) |
+| `HISTORY_ENTRY` | `position`, `label`, `crystal` | reply to `REQUEST_HISTORY_ENTRY` |
 | `HISTORY_STATE` | `can_undo`, `can_redo`, `position`, `length`, `label`, `entries[]` (`position`, `label`, `formula`, `n_atoms`, `energy_per_atom`, `spacegroup_symbol`) | after every history change |
 | `RELAXATION_FRAME` | `step`, `converged`, `final`, `crystal` | step 0 is the start structure |
 | `FLOW_TRAJECTORY_FRAME` | `step` (1..`total_steps`), `total_steps`, `t`, `crystal` | |
@@ -101,8 +112,8 @@ Notes:
 | `COMMITTEE_RESULT` | `entries[]` (pressure, max force, relaxed volume per atom, lattice, space group, energy), `spread{pressure_gpa, max_force, volume_percent, lattice_percent}`, `method` | absolute energies are not comparable between models |
 | `PROTOTYPE_CANDIDATES` | `target_formula`, `n_sources`, `candidates[]` (`source_material_id`, `substitutions`, `probability`, `energy_per_atom`, `e_hull_ev`, `relaxed`, `crystal`), `method` | sorted by E_hull |
 | `PROGRESS` | `command`, `done`, `total`, `message` | non-terminal |
-| `STREAM_STOPPED` | `stopped` (command or null) | |
-| `ERROR` | `code`, `message`, `command` | |
+| `STREAM_STOPPED` | `stopped` (command or null), `history_pushed` | `history_pushed`: a `HISTORY_STATE` for the stopped stream follows |
+| `ERROR` | `code`, `message`, `command`, `history_pushed`, `after_terminal` | see §1 (one terminal group per stream) |
 
 `CrystalStatePayload` holds:
 - `formula`, space group (symbol and number), `lattice` (a, b, c, α, β, γ, row-vector `matrix`, `volume`);
@@ -147,7 +158,7 @@ Every endpoint is stateless and none touches a WebSocket session. Errors return 
 
 | Endpoint | Body / query | Response |
 |---|---|---|
-| `GET /api/health` | – | `status`, `umlip_backend` (`lj-fallback` = analytic fallback), `device`, `dtype`, `load_error`, `hull_available` |
+| `GET /api/health` | – | `status`, `umlip_backend` (`lj-fallback` = analytic fallback), `device`, `dtype`, `load_error`, `hull_available`, `max_atoms`, `phonon_max_atoms` |
 | `GET /api/presets` | – | preset list: `id` (`srtio3`, `li3ps4`, `si`, `batio3`), name, formula, space group, expected stability |
 | `GET /api/models` | – | `models[]` (`id`, `label`, `description`, `family`, `checkpoint_cached`, `supports_dispersion`, `is_default`), `default_model_id` |
 | `POST /api/import/cif` | `{cif}` | `CrystalStatePayload` (preview only; load it with `LOAD_STRUCTURE`) |

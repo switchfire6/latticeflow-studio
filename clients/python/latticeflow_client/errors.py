@@ -12,17 +12,19 @@ class StudioError(Exception):
     (``INVALID_PAYLOAD``, ``NO_PHONON_ANALYSIS``, ``HULL_UNAVAILABLE``, ...).
     ``reply`` holds whatever the command had produced before the error (e.g. the
     final relaxation frame before ``RELAXATION_DIVERGED``); ``status`` is the HTTP
-    status for REST errors.
+    status for REST errors. ``after_terminal`` (Phase D servers) marks an ``ERROR`` sent after
+    the stream's terminal frame: the stream is over and its result is in ``reply``.
     """
 
     def __init__(self, code: str, message: str, *, command: Optional[str] = None,
-                 status: Optional[int] = None, reply: Any = None) -> None:
+                 status: Optional[int] = None, reply: Any = None, after_terminal: bool = False) -> None:
         super().__init__(f"{code}: {message}")
         self.code = code
         self.message = message
         self.command = command
         self.status = status
         self.reply = reply
+        self.after_terminal = after_terminal
 
 
 class StreamStopped(StudioError):
