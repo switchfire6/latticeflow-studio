@@ -43,7 +43,7 @@ Every committed change goes into the undo/redo history (50 entries), and the ses
 
 ## Quick start
 
-You need Python 3.11 and Node 20 or newer. A CUDA GPU is optional; small cells run fine on a CPU.
+You need Python 3.11 and Node 22.12 or newer. A CUDA GPU is optional; small cells run fine on a CPU.
 
 **1. Backend**, from `backend/`:
 
