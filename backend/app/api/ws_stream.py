@@ -1560,6 +1560,10 @@ class StudioSession:
 
         atoms = _snapshot(self._require_atoms())
         bonds = list(self.payload.bonds)  # aligned with the active payload (bond_ideal_lengths)
+        # The bond image offsets refer to the payload's wrapped coordinates; the session atoms
+        # can sit a hair outside [0, 1) after a relaxation, which would pick the wrong images.
+        if len(self.payload.atoms) == len(atoms):
+            atoms.positions = np.array([a.cart_coords for a in self.payload.atoms], dtype=float)
         try:
             data = await asyncio.to_thread(
                 lambda: local_structure.analyze(atoms, bonds, include_partial_rdf=p.include_partial_rdf)

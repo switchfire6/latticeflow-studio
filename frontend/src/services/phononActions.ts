@@ -37,6 +37,13 @@ export function selectModeAt(qIndex: number, band: number, store: CrystalStore =
   return ok ? "requested" : "unavailable";
 }
 
+/**
+ * Soft-mode wells are shallow: at a 0.1 Å displacement the forces are often already below the
+ * usual 0.02 eV/Å, so the follow-up relaxation needs a tighter threshold to reach the minimum.
+ */
+export const FOLLOW_FMAX = 0.005;
+export const FOLLOW_MAX_STEPS = 300;
+
 /** True when the selected, loaded eigenmode is imaginary and can be followed. */
 export function canFollow(st: ReturnType<CrystalStore["getState"]>): boolean {
   const m = st.selectedEigenmode;
@@ -58,8 +65,8 @@ export function followSelectedInstability(amplitude: number, store: CrystalStore
     q_index: m.q_index,
     band_index: m.band_index,
     amplitude,
-    fmax: 0.02,
-    max_steps: 200,
+    fmax: FOLLOW_FMAX,
+    max_steps: FOLLOW_MAX_STEPS,
   });
   if (!ok) return false;
   // Phase C2: keep the parent (with its phonons) for "Compare with parent".

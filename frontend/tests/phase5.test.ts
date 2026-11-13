@@ -137,7 +137,7 @@ describe("mode selection and Follow Instability", () => {
     selectModeAt(0, 0, store, send); // R, −2.5 THz
     store.getState().setDock({ hidden: ["relaxation"], open: false });
     expect(followSelectedInstability(0.08, store, send)).toBe(true);
-    expect(sent.at(-1)).toEqual({ type: "FOLLOW_INSTABILITY", payload: { q_index: 0, band_index: 0, amplitude: 0.08, fmax: 0.02, max_steps: 200 } });
+    expect(sent.at(-1)).toEqual({ type: "FOLLOW_INSTABILITY", payload: { q_index: 0, band_index: 0, amplitude: 0.08, fmax: 0.005, max_steps: 300 } });
     let s = store.getState();
     expect(s.followResult).toMatchObject({ status: "running", qLabel: "R", amplitude: 0.08, from: { spacegroupSymbol: "Pm-3m" } });
     expect(s.dock.open).toBe(true);

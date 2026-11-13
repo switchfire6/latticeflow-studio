@@ -34,6 +34,7 @@ interface Layout {
 }
 
 const _p: Vec3 = [0, 0, 0];
+const MAX_FRAMEWORK_CN = 8;
 
 function buildLayout(f: ReturnType<typeof useCrystalStore.getState>["frame"], la: LocalAnalysisState, images: DrawnImage[], key: string): Layout {
   const out: Layout = { key, tris: [], triColor: [], edges: [], edgeColor: [] };
@@ -44,10 +45,14 @@ function buildLayout(f: ReturnType<typeof useCrystalStore.getState>["frame"], la
     else byCenter.set(im.atom, [im]);
   }
   const col = new THREE.Color();
+  // Large cages (CN > 8, e.g. the perovskite A site) hide the framework polyhedra, so
+  // they are drawn only when the structure has nothing smaller.
+  const hasFramework = la.data.polyhedra.some((p) => p.ligand_indices.length >= 3 && p.ligand_indices.length <= MAX_FRAMEWORK_CN);
   for (const poly of la.data.polyhedra) {
     const ims = byCenter.get(poly.center_index);
     const n = poly.ligand_indices.length;
     if (!ims || n < 3 || poly.ligand_indices.some((i) => i >= f.n)) continue;
+    if (hasFramework && n > MAX_FRAMEWORK_CN) continue;
     // hull topology from the home-image geometry
     const pts: Vec3[] = poly.ligand_indices.map((li, k) => {
       const o = poly.ligand_image_offsets[k] ?? [0, 0, 0];

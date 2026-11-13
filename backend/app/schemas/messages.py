@@ -178,8 +178,10 @@ class FollowInstabilityPayload(BaseModel):
     q_index: int = Field(ge=0)
     band_index: int = Field(ge=0)
     amplitude: float = Field(default=0.1, gt=0)       # max atomic displacement in Angstroms
-    fmax: float = Field(default=0.02, gt=0)
-    max_steps: int = Field(default=200, ge=1, le=2000)
+    # Tighter than START_RELAXATION: soft-mode wells are shallow, so at 0.02 eV/A the
+    # relaxation can stop before the structure has moved off the displaced start.
+    fmax: float = Field(default=0.005, gt=0)
+    max_steps: int = Field(default=300, ge=1, le=2000)
 
 
 class StopStreamPayload(BaseModel):

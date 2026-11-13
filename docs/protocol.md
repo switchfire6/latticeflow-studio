@@ -7,7 +7,7 @@ This reference covers the WebSocket session (`/ws/studio`) and the REST API (`/a
 - `backend/app/schemas/api.py` (REST bodies);
 - the session rules in `backend/app/api/ws_stream.py`.
 
-Field-level detail lives in those files, and in `PROJECT_SPEC.md` §5 and §10. This page lists every message and what ends it. Every change to the protocol is additive.
+Field-level detail lives in those files, and in [`design/PROJECT_SPEC.md`](design/PROJECT_SPEC.md) §5 and §10. This page lists every message and what ends it. Every change to the protocol is additive.
 
 ## 1. Session model
 
@@ -66,7 +66,7 @@ Field-level detail lives in those files, and in `PROJECT_SPEC.md` §5 and §10. 
 | `COMPUTE_BULK_MODULUS` | I | `strain_window=0.02`, `n_points=5` | `BULK_MODULUS_RESULT` (also stores `bulk_modulus_gpa` on the active payload) |
 | `REQUEST_LOCAL_ANALYSIS` | I | `include_partial_rdf=true` | `LOCAL_ANALYSIS_DATA` |
 | `START_RELAXATION` | S (sc) | `fmax=0.02`, `max_steps=100`, `relax_cell=true`, `fix_symmetry=false`, `pressure_gpa=0`, `stress_tol_gpa?`, `optimizer=FIRE`/`BFGS`/`LBFGS` | `RELAXATION_FRAME`… ending with `final=true`, then `HISTORY_STATE`. Divergence: final frame, `ERROR RELAXATION_DIVERGED`, `HISTORY_STATE` |
-| `FOLLOW_INSTABILITY` | S (sc) | `q_index`, `band_index`, `amplitude=0.1` Å, `fmax=0.02`, `max_steps=200` | same as `START_RELAXATION`; the commensurate supercell becomes active (`MODE_NOT_IMAGINARY`, `NO_PHONON_ANALYSIS`, `STRUCTURE_TOO_LARGE`) |
+| `FOLLOW_INSTABILITY` | S (sc) | `q_index`, `band_index`, `amplitude=0.1` Å, `fmax=0.005`, `max_steps=300` | same as `START_RELAXATION`; the commensurate supercell becomes active (`MODE_NOT_IMAGINARY`, `NO_PHONON_ANALYSIS`, `STRUCTURE_TOO_LARGE`) |
 | `START_FLOW_GENERATION` | S (sc) | `elements`, `num_atoms=12`, `composition?` (atoms per cell), `target_spacegroup?`, `target_crystal_system?`, `target_bulk_modulus_gpa?`, `steps=60`, `physics_guidance_scale=1.5`, `seed?`, `top_k=1` | `FLOW_TRAJECTORY_FRAME`…, then [`GENERATION_CANDIDATES` if `top_k > 1`], `CRYSTAL_STATE_FINAL`, `HISTORY_STATE`. Rank 1 is the active endpoint; load the other candidates with `LOAD_STRUCTURE {crystal}`. A `composition` that does not fit the target group is scaled ×2, ×3, ×4 (within the atom limit) before `GENERATION_FAILED`, e.g. NaCl in #225 becomes Na4Cl4 |
 | `RUN_PHONON_SHAKE_TEST` | S | `supercell_dim=[2,2,2]`, `displacement_distance=0.01`, `cell_mode=as_displayed`/`primitive`, `min_supercell_length?` (overrides `supercell_dim`) | `PHONON_ANALYSIS_COMPLETE`, then a `SINGLE_POINT_UPDATE` that flags the atoms and bonds of the softest mode (no new energy evaluation, no history entry) |
 | `CHECK_PHONON_CONVERGENCE` | S | `supercell_dim?` (default: current + 1 on every axis, ≤ 600 atoms) | `PHONON_CONVERGENCE_RESULT`, `PHONON_ANALYSIS_COMPLETE` (replaces the cache), flagging `SINGLE_POINT_UPDATE` |
