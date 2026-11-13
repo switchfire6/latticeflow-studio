@@ -240,7 +240,7 @@ from app.core.flow_generator import FlowCancelled, RiemannianFlowGenerator
 from app.core.phonon_engine import PhononAnalysis, PhononCancelled
 from app.core.relaxer import RelaxationDivergedError
 from app.core.structure_io import StructureIOError, atoms_from_cif, max_atoms
-from app.core.umlip_engine import ModelUnavailableError, UMLIPEngine, get_engine
+from app.core.umlip_engine import ModelUnavailableError, UMLIPEngine, get_engine, wrap_in_place
 from app.presets import DEFAULT_PRESET_ID, load_preset
 from app.schemas.crystal import CrystalStatePayload
 from app.schemas.messages import (
@@ -426,10 +426,7 @@ def canonical_element(symbol: str) -> Tuple[str, int]:
 
 def _wrap_in_place(atoms: Atoms) -> None:
     """Wrap fractional coordinates into [0, 1) (same rule as the engine / relaxer)."""
-    frac = atoms.cell.scaled_positions(atoms.positions)
-    frac = np.mod(frac, 1.0)
-    frac[frac >= 1.0] = 0.0
-    atoms.positions = frac @ atoms.cell.array
+    wrap_in_place(atoms)
 
 
 def equivalent_sites(atoms: Atoms, index: int, symprec: float = EQUIVALENT_SITES_SYMPREC) -> List[int]:

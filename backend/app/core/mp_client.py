@@ -32,7 +32,8 @@ MAX_RESULTS = 50
 MAX_CONVENTIONAL_ATOMS = 64
 MP_SEARCH_FIELDS = ["material_id", "formula_pretty", "symmetry", "nsites", "energy_above_hull",
                     "is_stable", "theoretical"]
-_ID_RE = re.compile(r"^(mp|mvc)-\d+$", re.IGNORECASE)
+# Classic ids are numeric ("mp-5229"); newer Materials Project entries use letters ("mp-aaaieiuj").
+_ID_RE = re.compile(r"^(mp|mvc)-[a-z0-9]+$", re.IGNORECASE)
 
 
 class MPError(RuntimeError):

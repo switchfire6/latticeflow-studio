@@ -181,11 +181,12 @@ def _wrap_atoms_in_place(atoms: Atoms) -> None:
     pbc = np.asarray(atoms.pbc, dtype=bool)
     if not pbc.any():
         return
-    frac = atoms.cell.scaled_positions(atoms.positions)
-    wrapped = np.mod(frac[:, pbc], 1.0)
-    wrapped[wrapped >= 1.0] = 0.0
-    frac[:, pbc] = wrapped
-    atoms.positions = frac @ atoms.cell.array  # positions setter: bypasses constraints (lattice translation)
+    from app.core.umlip_engine import wrap_in_place
+
+    # The engine's own rule (it snaps the last 1e-12 below 1 to 0). A second, slightly
+    # different rule here once left atoms on a cell face one lattice vector away from
+    # the payload. The positions setter bypasses constraints (lattice translation).
+    wrap_in_place(atoms)
 
 
 def _snapshot(atoms: Atoms) -> Tuple[np.ndarray, np.ndarray]:

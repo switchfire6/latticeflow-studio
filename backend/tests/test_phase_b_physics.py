@@ -251,6 +251,9 @@ def test_mp_routes(client):
     assert len(atoms_from_cif(r["cif"])) == 5 and r["entry"]["material_id"] == "mp-5229"
     assert mp_client.parse_query("li-fe-o") == ("chemsys", "Fe-Li-O")
     assert mp_client.parse_query("MP-5229") == ("material_ids", ["mp-5229"])
+    # newer Materials Project ids use letters instead of digits
+    assert mp_client.parse_query("mp-aaaieiuj") == ("material_ids", ["mp-aaaieiuj"])
+    assert mp_client.normalize_material_id(" MP-AAAIEIUJ ") == "mp-aaaieiuj"
 
 
 def test_models_route_and_hull_model_unavailable(client, fallback_engine):

@@ -149,14 +149,19 @@ pip install -e clients/python
 pytest clients/python/tests -q
 ```
 
+**Validation sweep.** With the backend running, `python clients/python/examples/validation.py` runs the main workflows on Si, SrTiO₃, BaTiO₃ and NaCl and prints about 70 checks of two kinds:
+
+- *Consistency* checks must pass with any model: the bulk modulus from the equation of state matches the elastic tensor, C_ij has the crystal's symmetry, the phonon DOS integrates to 3N, a supercell has the same energy per atom, and file export and import round-trip. A failure here is a bug.
+- *Reference* checks compare with experiment. With MACE-MP-0 small all consistency checks pass, and the reference checks that fall outside tolerance are the model softness described below (add `--model medium-mpa-0` to see the larger model).
+
 ## Scientific scope and limits
 
 - **The force field is a screening-grade universal potential.** MACE-MP-0 *small*, the default, is systematically soft:
   - bulk and elastic moduli run low (Si C11 ≈ 96 GPa against ≈ 166 GPa experimentally);
-  - phonon frequencies are underestimated (the Si optical mode is about 11.7 THz against about 15.5 THz);
+  - phonon frequencies are underestimated (the Si optical mode is about 11.5 THz against about 15.5 THz);
   - barriers come out too low.
 
-  For quantitative numbers, use the larger models (MACE-MPA-0 / OMAT-0 medium) and check the committee spread. The potential gives no electronic properties: no band gaps, magnetism or charge states. Confirm anything important with DFT.
+  The larger models are closer but still soft: MACE-MPA-0 medium gives K ≈ 86 GPa for Si (98 GPa experimentally) and an optical mode of 12.7 THz. Use them for quantitative work and check the committee spread. The potential gives no electronic properties: no band gaps, magnetism or charge states. Confirm anything important with DFT.
 - **Phonons are harmonic,** computed by finite displacement in a finite supercell. There is no anharmonic renormalisation, so "unstable at 0 K" does not mean unstable at room temperature. Cubic SrTiO₃ and BaTiO₃ are the high-temperature phases.
 - **No LO–TO splitting.** There is no non-analytical correction, so polar crystals show no LO–TO splitting at Γ. Check supercell convergence before trusting soft modes. Results for unrelaxed structures, such as the Li₃PS₄ preset as loaded, are not physically meaningful; relax first.
 - **E_hull is self-consistent in the potential.** It is measured against Materials Project structures relaxed with the same potential, not against MP's DFT energies. Its accuracy is bounded by the model's formation-energy error, typically tens of meV/atom.

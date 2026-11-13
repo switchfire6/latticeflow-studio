@@ -735,6 +735,11 @@ def _wrap_in_place(work: Atoms) -> np.ndarray:
     return np.zeros((len(work), 3))
 
 
+#: The one wrapping rule of the studio. The relaxer and the session use it too, so the
+#: atoms they keep and the payload they send always sit on the same lattice image.
+wrap_in_place = _wrap_in_place
+
+
 def reduced_formula(atoms: Atoms) -> str:
     """Reduced formula in Materials Project / pymatgen convention (e.g. ``SrTiO3``)."""
     if len(atoms) == 0:

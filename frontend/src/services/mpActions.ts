@@ -11,7 +11,7 @@ export type MpQueryKind = "mp-id" | "chemsys" | "formula" | "invalid";
 /** How the backend will read the query (display hint; the server does the parsing). */
 export function classifyMpQuery(q: string): MpQueryKind {
   const t = q.trim();
-  if (/^mp-\d+$/i.test(t) || /^\d+$/.test(t)) return "mp-id";
+  if (/^(mp|mvc)-[a-z0-9]+$/i.test(t) || /^\d+$/.test(t)) return "mp-id"; // newer MP ids use letters (mp-aaaieiuj)
   if (/^[A-Z][a-z]?(-[A-Z][a-z]?)+$/.test(t)) return "chemsys";
   if (/^([A-Z][a-z]?\d*(\.\d+)?)+$/.test(t)) return "formula";
   return "invalid";

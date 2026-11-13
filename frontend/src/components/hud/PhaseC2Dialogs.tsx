@@ -52,6 +52,12 @@ function SidePicker({ label, color, value, onChange }: { label: string; color: s
       onChange(pendingOpt.snapshot);
     } else if (pending && !pendingOpt) setPending(null); // the entry left the history
   }, [pending, pendingOpt, onChange]);
+  useEffect(() => {
+    if (!pending) return;
+    // No reply (the fetch failed and an error toast was shown): stop showing "loading".
+    const t = setTimeout(() => setPending(null), 8000);
+    return () => clearTimeout(t);
+  }, [pending]);
   const pick = (id: string) => {
     if (id === "__kept") return onChange(value);
     const o = opts.find((x) => x.id === id);

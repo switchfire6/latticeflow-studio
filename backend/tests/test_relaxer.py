@@ -137,6 +137,16 @@ def test_max_steps_cutoff(engine):
     assert atoms.calc is None
 
 
+def test_atoms_on_a_cell_face_stay_on_the_payload_image(fallback_engine):
+    """Round-off on a cell face must not leave the atoms one lattice vector away from the payload."""
+    atoms = load_preset("srtio3")
+    frac = atoms.get_scaled_positions(wrap=False)
+    frac[0] = [-1e-16, 1.0 - 1e-13, 0.0]
+    atoms.set_scaled_positions(frac)
+    frame = next(iter_relaxation(atoms, fallback_engine, max_steps=0))
+    np.testing.assert_allclose(atoms.positions, [a.cart_coords for a in frame.crystal.atoms], atol=1e-9)
+
+
 def test_max_steps_zero_gives_single_final_frame(fallback_engine):
     frames = list(iter_relaxation(rattled("srtio3"), fallback_engine, max_steps=0))
     assert len(frames) == 1 and frames[0].final and not frames[0].converged and frames[0].step == 0

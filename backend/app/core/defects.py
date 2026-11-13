@@ -342,6 +342,12 @@ def formation_energy(
         name: float(e_def - e_bulk - sum(dn * mus[e] for e, dn in delta_n.items()))
         for name, mus in limits.items()
     }
+    negative = sorted(name for name, ef in formation.items() if ef < 0)
+    if negative:
+        warnings.append(
+            f"negative formation energy at {', '.join(negative)}: the defect would form spontaneously there. "
+            "For a stable host this usually points to force-field error or a too small cell, not to real physics"
+        )
     report(3, 3, "Done")
     scale = f"; bulk scaled x{k} to the defect cell" if k != 1 else ""
     method = (
