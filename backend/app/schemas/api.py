@@ -45,6 +45,9 @@ class HullEvaluateRequest(BaseModel):
 
     crystal: CrystalStatePayload
     relax: bool = True   # Phase A §5.11: relax the candidate (reference settings) before scoring
+    # ---- Phase B §6.1: score with the session's force field (None = process default)
+    model_id: Optional[str] = None
+    dispersion: bool = False
 
 
 class HullReferencePhase(BaseModel):
@@ -73,3 +76,79 @@ class ErrorResponse(BaseModel):
 
     code: str                           # an app.schemas.messages.ErrorCode value
     message: str
+
+
+# --------------------------------------------------------------------------- #
+# Phase B (IMPROVEMENT_SUGGESTIONS.md §4.3, §5.6, §6.1)
+# --------------------------------------------------------------------------- #
+class ModelInfo(BaseModel):
+    id: str                             # "small", "medium", "large", "medium-mpa-0", "medium-omat-0", "lj-fallback"
+    label: str                          # e.g. "MACE-MPA-0 medium"
+    description: str                    # training data / intended use / accuracy notes
+    family: str                         # "mace" | "fallback"
+    checkpoint_cached: bool             # True = loads without a download
+    approx_size_mb: Optional[float] = None
+    supports_dispersion: bool
+    is_default: bool                    # the process default (LATTICEFLOW_MACE_MODEL)
+
+
+class ModelListResponse(BaseModel):
+    """GET /api/models."""
+
+    models: List[ModelInfo]
+    default_model_id: str
+
+
+class DiffractionRequest(BaseModel):
+    """POST /api/diffraction (stateless; pymatgen XRDCalculator / NDCalculator)."""
+
+    crystal: CrystalStatePayload
+    kind: Literal["xray", "neutron"] = "xray"
+    radiation: str = "CuKa"             # pymatgen wavelength key (CuKa, MoKa, CrKa, FeKa, CoKa, AgKa, ...)
+    wavelength_angstrom: Optional[float] = Field(default=None, gt=0, le=5)   # overrides radiation
+    two_theta_min: float = Field(default=5.0, ge=0, lt=180)
+    two_theta_max: float = Field(default=90.0, gt=0, le=180)
+
+
+class DiffractionHkl(BaseModel):
+    hkl: List[int]                      # Miller indices (3 integers; hexagonal 4-index reduced to 3)
+    multiplicity: int
+
+
+class DiffractionPeak(BaseModel):
+    two_theta: float                    # degrees
+    intensity: float                    # scaled so the strongest peak is 100
+    d_spacing: float                    # Angstrom
+    hkls: List[DiffractionHkl]
+
+
+class DiffractionResponse(BaseModel):
+    kind: str
+    radiation: Optional[str]            # None when wavelength_angstrom was given
+    wavelength_angstrom: float
+    peaks: List[DiffractionPeak]
+
+
+class MPEntry(BaseModel):
+    material_id: str                    # "mp-5229"
+    formula: str                        # reduced formula
+    spacegroup_symbol: str
+    spacegroup_number: int
+    nsites: int
+    energy_above_hull: Optional[float]  # MP DFT value, eV/atom
+    is_stable: Optional[bool]
+    theoretical: Optional[bool]
+
+
+class MPSearchResponse(BaseModel):
+    """GET /api/mp/search?q=<formula | chemsys like Li-Fe-O | mp-id> (sorted by energy_above_hull, <= 50)."""
+
+    query: str
+    results: List[MPEntry]
+
+
+class MPStructureResponse(BaseModel):
+    """GET /api/mp/structure/{material_id}: the client loads `cif` via LOAD_STRUCTURE {cif}."""
+
+    entry: MPEntry
+    cif: str

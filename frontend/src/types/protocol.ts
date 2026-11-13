@@ -123,6 +123,11 @@ export interface StartRelaxationPayload {
 export interface RunPhononShakeTestPayload {
   supercell_dim?: [number, number, number]; // default [2, 2, 2]
   displacement_distance?: number; // default 0.01 Å
+  /** Phase B: "primitive" = textbook dispersion of the spglib primitive cell (3·N_prim branches,
+   *  standard seekpath path); eigenvectors are still mapped onto the displayed atoms. */
+  cell_mode?: "as_displayed" | "primitive";
+  /** Phase B: when set, overrides supercell_dim (diagonal n_i = ceil(L/|a_i|), ≤ 600 atoms). */
+  min_supercell_length?: number | null;
 }
 
 export type StructureTextFormat = "auto" | "cif" | "poscar" | "extxyz";
@@ -182,6 +187,11 @@ export interface ClientCommandMap {
   UNDO: Record<string, never>;
   REDO: Record<string, never>;
   REQUEST_PHONON_DOS: RequestPhononDosPayload;
+  // Phase B
+  CHECK_PHONON_CONVERGENCE: CheckPhononConvergencePayload;
+  COMPUTE_ELASTIC_TENSOR: ComputeElasticTensorPayload;
+  EXPORT_PHONON_DATA: Record<string, never>;
+  SET_MODEL: SetModelPayload;
 }
 export type ClientCommand = keyof ClientCommandMap;
 
@@ -231,6 +241,24 @@ export interface PhononAnalysisComplete {
   kpath_labels: KPathLabel[];
   frequencies_thz: number[][]; // [n_q][3N], ascending per q
   eigenmodes: Eigenmode[]; // every band at each distinct labelled point
+  // ---- Phase B (optional)
+  cell_mode?: "as_displayed" | "primitive";
+  n_primitive_atoms?: number | null;
+  supercell_dim?: [number, number, number] | null;
+  min_image_distance?: number | null; // Å
+  /** band_order[q][k] = index into the ascending frequencies_thz[q] of connected branch k. */
+  band_order?: number[][] | null;
+  gamma_modes?: GammaModeIrrep[] | null;
+  band_path_source?: string | null;
+}
+
+export interface GammaModeIrrep {
+  band_indices: number[]; // into the ascending Γ frequencies
+  frequency_thz: number;
+  label: string | null; // e.g. "T1u"
+  is_acoustic: boolean;
+  ir_active: boolean | null;
+  raman_active: boolean | null;
 }
 
 export interface EigenmodeData {
@@ -299,7 +327,79 @@ export type ErrorCode =
   | "GENERATION_FAILED"
   | "RELAXATION_DIVERGED"
   | "COMPUTE_FAILED"
-  | "HULL_UNAVAILABLE";
+  | "HULL_UNAVAILABLE"
+  | "MP_UNAVAILABLE"
+  | "MP_NOT_FOUND"
+  | "MODEL_UNAVAILABLE";
+
+// ---- Phase B commands & events
+/** Terminal messages: PHONON_CONVERGENCE_RESULT, then PHONON_ANALYSIS_COMPLETE of the larger
+ *  supercell (replaces the phonon cache) and its flagging SINGLE_POINT_UPDATE. */
+export interface CheckPhononConvergencePayload {
+  supercell_dim?: [number, number, number] | null; // null = current + 1 per axis (≤ 600 atoms)
+}
+export interface ComputeElasticTensorPayload {
+  max_strain?: number; // default 0.01, ≤ 0.05
+  n_strains?: number; // default 4 (±), 2–8
+  relax_ions?: boolean; // default true
+  fmax?: number; // default 0.01 eV/Å
+}
+/** Terminal: MODEL_CHANGED, then SINGLE_POINT_UPDATE (re-evaluated) and HISTORY_STATE. */
+export interface SetModelPayload {
+  model_id: string;
+  dispersion?: boolean; // D3(BJ), MACE only
+}
+export interface Progress {
+  command: ClientCommand;
+  done: number;
+  total: number;
+  message: string;
+}
+export interface PhononConvergenceResult {
+  supercell_dim_a: [number, number, number];
+  supercell_dim_b: [number, number, number];
+  min_image_distance_a: number;
+  min_image_distance_b: number;
+  min_frequency_thz_a: number;
+  min_frequency_thz_b: number;
+  max_abs_delta_thz: number;
+  rms_delta_thz: number;
+  per_label_max_delta_thz: Record<string, number>;
+  tolerance_thz: number;
+  converged: boolean;
+}
+export interface ElasticTensorResult {
+  c_ij_gpa: number[][]; // 6×6 Voigt
+  eigenvalues_gpa: number[];
+  born_stable: boolean;
+  k_voigt_gpa: number;
+  k_reuss_gpa: number;
+  k_vrh_gpa: number;
+  g_voigt_gpa: number;
+  g_reuss_gpa: number;
+  g_vrh_gpa: number;
+  youngs_modulus_vrh_gpa: number;
+  poisson_ratio_vrh: number;
+  pugh_ratio: number;
+  universal_anisotropy: number;
+  debye_temperature_k: number | null;
+  relaxed_ions: boolean;
+  max_strain: number;
+  reference_pressure_gpa: number;
+  fit_residual_gpa: number;
+  method: string;
+}
+export interface PhononExport {
+  filename: string;
+  phonopy_yaml: string;
+}
+export interface ModelChanged {
+  model_id: string;
+  backend_name: string;
+  dispersion: boolean;
+  device: string;
+  dtype: string;
+}
 
 export interface ErrorPayload {
   code: ErrorCode;
@@ -319,6 +419,12 @@ export interface ServerEventMap {
   BULK_MODULUS_RESULT: BulkModulusResult;
   PHONON_DOS_DATA: PhononDosData;
   HISTORY_STATE: HistoryState;
+  // Phase B
+  PROGRESS: Progress;
+  PHONON_CONVERGENCE_RESULT: PhononConvergenceResult;
+  ELASTIC_TENSOR_RESULT: ElasticTensorResult;
+  PHONON_EXPORT: PhononExport;
+  MODEL_CHANGED: ModelChanged;
 }
 export type ServerEvent = keyof ServerEventMap;
 
@@ -371,6 +477,8 @@ export interface ImportCifRequest {
 export interface HullEvaluateRequest {
   crystal: CrystalStatePayload;
   relax?: boolean; // default true: relax the candidate before scoring
+  model_id?: string | null; // Phase B: the session's model (null = process default)
+  dispersion?: boolean;
 }
 
 export interface HullReferencePhase {
@@ -395,4 +503,64 @@ export interface HullEvaluateResponse {
 export interface ErrorResponse {
   code: ErrorCode;
   message: string;
+}
+
+// --------------------------------------------------------------------------- //
+// Phase B REST bodies
+// --------------------------------------------------------------------------- //
+export interface ModelInfo {
+  id: string; // "small" | "medium" | "large" | "medium-mpa-0" | "medium-omat-0" | "lj-fallback"
+  label: string;
+  description: string;
+  family: "mace" | "fallback";
+  checkpoint_cached: boolean;
+  approx_size_mb: number | null;
+  supports_dispersion: boolean;
+  is_default: boolean;
+}
+export interface ModelListResponse {
+  models: ModelInfo[];
+  default_model_id: string;
+}
+
+export interface DiffractionRequest {
+  crystal: CrystalStatePayload;
+  kind?: "xray" | "neutron";
+  radiation?: string; // pymatgen key, default "CuKa"
+  wavelength_angstrom?: number | null;
+  two_theta_min?: number; // default 5
+  two_theta_max?: number; // default 90
+}
+export interface DiffractionPeak {
+  two_theta: number;
+  intensity: number; // strongest = 100
+  d_spacing: number;
+  hkls: { hkl: number[]; multiplicity: number }[];
+}
+export interface DiffractionResponse {
+  kind: string;
+  radiation: string | null;
+  wavelength_angstrom: number;
+  peaks: DiffractionPeak[];
+}
+
+export interface MPEntry {
+  material_id: string;
+  formula: string;
+  spacegroup_symbol: string;
+  spacegroup_number: number;
+  nsites: number;
+  energy_above_hull: number | null;
+  is_stable: boolean | null;
+  theoretical: boolean | null;
+}
+/** GET /api/mp/search?q=… */
+export interface MPSearchResponse {
+  query: string;
+  results: MPEntry[];
+}
+/** GET /api/mp/structure/{material_id}; load `cif` via LOAD_STRUCTURE {cif}. */
+export interface MPStructureResponse {
+  entry: MPEntry;
+  cif: string;
 }

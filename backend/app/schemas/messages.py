@@ -34,6 +34,11 @@ class ClientCommand(str, Enum):
     UNDO = "UNDO"                                   # instant, state-changing
     REDO = "REDO"                                   # instant, state-changing
     REQUEST_PHONON_DOS = "REQUEST_PHONON_DOS"       # instant, needs a valid phonon analysis
+    # Phase B
+    CHECK_PHONON_CONVERGENCE = "CHECK_PHONON_CONVERGENCE"   # streaming, needs a valid phonon analysis
+    COMPUTE_ELASTIC_TENSOR = "COMPUTE_ELASTIC_TENSOR"       # streaming (PROGRESS events)
+    EXPORT_PHONON_DATA = "EXPORT_PHONON_DATA"               # instant, needs a valid phonon analysis
+    SET_MODEL = "SET_MODEL"                                 # streaming (load / download), state-changing
 
 
 class ServerEvent(str, Enum):
@@ -49,6 +54,12 @@ class ServerEvent(str, Enum):
     BULK_MODULUS_RESULT = "BULK_MODULUS_RESULT"
     PHONON_DOS_DATA = "PHONON_DOS_DATA"
     HISTORY_STATE = "HISTORY_STATE"
+    # Phase B
+    PROGRESS = "PROGRESS"
+    PHONON_CONVERGENCE_RESULT = "PHONON_CONVERGENCE_RESULT"
+    ELASTIC_TENSOR_RESULT = "ELASTIC_TENSOR_RESULT"
+    PHONON_EXPORT = "PHONON_EXPORT"
+    MODEL_CHANGED = "MODEL_CHANGED"
 
 
 class Envelope(BaseModel):
@@ -94,6 +105,14 @@ class StartRelaxationPayload(BaseModel):
 class RunPhononShakeTestPayload(BaseModel):
     supercell_dim: List[int] = Field(default_factory=lambda: [2, 2, 2], min_length=3, max_length=3)
     displacement_distance: float = Field(default=0.01, gt=0)
+    # ---- Phase B (IMPROVEMENT_SUGGESTIONS.md §5.2-5.3)
+    cell_mode: Literal["as_displayed", "primitive"] = "as_displayed"
+    #   primitive: force constants and bands of the spglib primitive cell with the standard seekpath
+    #   path (textbook dispersion, 3 N_prim branches); eigenvectors are still mapped onto the
+    #   displayed atoms (N_displayed x 3) with q_frac in the displayed cell's reciprocal basis.
+    min_supercell_length: Optional[float] = Field(default=None, gt=0, le=40)
+    #   when set, overrides supercell_dim: diagonal n_i = ceil(L / |a_i|) of the phonon cell, reduced
+    #   (largest n first) until the supercell has <= PHONON_SUPERCELL_MAX_ATOMS (600) atoms.
 
 
 class LoadStructurePayload(BaseModel):
@@ -214,6 +233,27 @@ class PhononAnalysisComplete(BaseModel):
     kpath_labels: List[KPathLabel]
     frequencies_thz: List[List[float]]      # [n_q][3N], ascending within each q-point
     eigenmodes: List[Eigenmode]             # every band at each labelled high-symmetry point
+    # ---- Phase B (all optional; v1.1 / Phase A clients ignore them)
+    cell_mode: str = "as_displayed"                    # "as_displayed" | "primitive"
+    n_primitive_atoms: Optional[int] = None            # N of the phonon cell in primitive mode (3N branches)
+    supercell_dim: Optional[List[int]] = None          # supercell actually used
+    min_image_distance: Optional[float] = None         # Angstrom: shortest lattice vector of that supercell
+    band_order: Optional[List[List[int]]] = None
+    #   band connection: band_order[q][k] = index into the ascending frequencies_thz[q] of connected
+    #   branch k (draw branch k through q by following it); None if not computed.
+    gamma_modes: Optional[List["GammaModeIrrep"]] = None   # irreps at Gamma (None if unavailable)
+    band_path_source: Optional[str] = None             # "seekpath-standard" | "seekpath-orig-cell" | "fallback"
+
+
+class GammaModeIrrep(BaseModel):
+    """One (possibly degenerate) set of modes at Gamma with its irreducible representation."""
+
+    band_indices: List[int]                 # indices into the ascending Gamma frequencies
+    frequency_thz: float
+    label: Optional[str] = None             # Mulliken / BSW label from phonopy, e.g. "T1u", "A1g"
+    is_acoustic: bool = False
+    ir_active: Optional[bool] = None        # irrep occurs in the vector representation
+    raman_active: Optional[bool] = None     # irrep occurs in the symmetric square of the vector representation
 
 
 class EigenmodeData(BaseModel):
@@ -222,6 +262,95 @@ class EigenmodeData(BaseModel):
 
 class StreamStopped(BaseModel):
     stopped: Optional[str] = None           # command type that was cancelled
+
+
+# ---- Phase B commands -------------------------------------------------------
+class CheckPhononConvergencePayload(BaseModel):
+    """Re-run the current phonon analysis (same cell_mode / displacement) in a larger supercell.
+
+    Terminal messages: PHONON_CONVERGENCE_RESULT, then PHONON_ANALYSIS_COMPLETE of the larger
+    supercell (which replaces the session's phonon cache) and its flagging SINGLE_POINT_UPDATE.
+    """
+
+    supercell_dim: Optional[List[int]] = Field(default=None, min_length=3, max_length=3)
+    #   None = current supercell + 1 along every axis, reduced (largest first) to <= 600 atoms
+
+
+class ComputeElasticTensorPayload(BaseModel):
+    max_strain: float = Field(default=0.01, gt=0, le=0.05)    # largest |strain| per component
+    n_strains: int = Field(default=4, ge=2, le=8)             # strain magnitudes per component, symmetric (+/-)
+    relax_ions: bool = True                                   # relax positions at fixed strain (relaxed-ion C_ij)
+    fmax: float = Field(default=0.01, gt=0)                   # ionic relaxation tolerance (eV/A)
+
+
+class ExportPhononDataPayload(BaseModel):
+    pass
+
+
+class SetModelPayload(BaseModel):
+    """Switch this session's force field. Terminal messages: MODEL_CHANGED, then a re-evaluated
+    SINGLE_POINT_UPDATE of the active structure and HISTORY_STATE (label "Switch model to <id>").
+    Invalidates the phonon cache. PROGRESS events may report a checkpoint download."""
+
+    model_id: str                         # an id from GET /api/models, e.g. "small", "medium-mpa-0", "lj-fallback"
+    dispersion: bool = False              # add D3(BJ) dispersion (MACE models only)
+
+
+# ---- Phase B events ---------------------------------------------------------
+class Progress(BaseModel):
+    command: str                          # the streaming command this belongs to
+    done: int
+    total: int
+    message: str = ""
+
+
+class PhononConvergenceResult(BaseModel):
+    supercell_dim_a: List[int]            # previous supercell
+    supercell_dim_b: List[int]            # larger supercell
+    min_image_distance_a: float
+    min_image_distance_b: float
+    min_frequency_thz_a: float
+    min_frequency_thz_b: float
+    max_abs_delta_thz: float              # max over the band path and all branches |f_b - f_a|
+    rms_delta_thz: float
+    per_label_max_delta_thz: Dict[str, float]   # labelled q-point -> max |delta f| there
+    tolerance_thz: float = 0.1
+    converged: bool                       # max_abs_delta_thz < tolerance and the stability verdict agrees
+
+
+class ElasticTensorResult(BaseModel):
+    c_ij_gpa: List[List[float]]           # 6x6 Voigt (xx, yy, zz, yz, xz, xy), symmetrised
+    eigenvalues_gpa: List[float]          # of C (Born stability: all > 0)
+    born_stable: bool
+    k_voigt_gpa: float
+    k_reuss_gpa: float
+    k_vrh_gpa: float
+    g_voigt_gpa: float
+    g_reuss_gpa: float
+    g_vrh_gpa: float
+    youngs_modulus_vrh_gpa: float
+    poisson_ratio_vrh: float
+    pugh_ratio: float                     # G_VRH / K_VRH (< ~0.57 ductile)
+    universal_anisotropy: float           # A^U = 5 G_V/G_R + K_V/K_R - 6
+    debye_temperature_k: Optional[float] = None
+    relaxed_ions: bool
+    max_strain: float
+    reference_pressure_gpa: float         # pressure of the unstrained structure (should be ~0)
+    fit_residual_gpa: float               # rms residual of the linear stress-strain fit
+    method: str
+
+
+class PhononExport(BaseModel):
+    filename: str                         # e.g. "SrTiO3_phonopy_params.yaml"
+    phonopy_yaml: str                     # phonopy_params.yaml incl. force constants (loadable with phonopy.load)
+
+
+class ModelChanged(BaseModel):
+    model_id: str
+    backend_name: str                     # e.g. "mace-mpa-0-medium+d3"
+    dispersion: bool
+    device: str
+    dtype: str
 
 
 # ---- Phase A events ---------------------------------------------------------
@@ -287,6 +416,9 @@ class ErrorCode(str, Enum):
     RELAXATION_DIVERGED = "RELAXATION_DIVERGED"
     COMPUTE_FAILED = "COMPUTE_FAILED"              # any other engine exception
     HULL_UNAVAILABLE = "HULL_UNAVAILABLE"          # REST only: no MP_API_KEY or MP unreachable
+    MP_UNAVAILABLE = "MP_UNAVAILABLE"              # REST only (Phase B): no MP_API_KEY (503) or MP unreachable (502)
+    MP_NOT_FOUND = "MP_NOT_FOUND"                  # REST only (Phase B): unknown material id (404)
+    MODEL_UNAVAILABLE = "MODEL_UNAVAILABLE"        # SET_MODEL / model_id: unknown model or it cannot be loaded
 
 
 class ErrorPayload(BaseModel):
@@ -297,3 +429,7 @@ class ErrorPayload(BaseModel):
 
 # Global imaginary-mode tolerance (PROJECT_SPEC.md §4.4 step 5).
 F_TOL_THZ = 0.05
+
+
+# Resolve the forward reference PhononAnalysisComplete -> GammaModeIrrep (Phase B).
+PhononAnalysisComplete.model_rebuild()
