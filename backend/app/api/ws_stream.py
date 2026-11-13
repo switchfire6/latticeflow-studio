@@ -364,6 +364,24 @@ _STREAMING = frozenset(
 _INIT = "__INIT__"  # internal first FIFO item: load the default preset
 
 
+#: Process-wide count of stream worker threads still running (all sessions). The job
+#: queue (``app.core.jobs``) pauses at its checkpoints while this is > 0, so
+#: interactive work has priority. Incremented in ``_launch``, decremented when the
+#: worker thread exits (a cancelled worker counts until its next checkpoint).
+_live_streams = 0
+_live_streams_lock = threading.Lock()
+
+
+def live_streams() -> int:
+    return _live_streams
+
+
+def _count_stream(delta: int) -> None:
+    global _live_streams
+    with _live_streams_lock:
+        _live_streams += delta
+
+
 def phonon_max_atoms() -> int:
     """Phonon shake-test atoms-per-cell limit (``Settings.phonon_max_atoms``, default 64)."""
     try:
@@ -912,9 +930,11 @@ class StudioSession:
                         None, None, True,
                     )
             finally:
+                _count_stream(-1)
                 job.post(job.mark_done)
 
         job.thread = threading.Thread(target=run, name=f"ws-job-{command.lower()}", daemon=True)
+        _count_stream(+1)
         job.thread.start()
         return job
 

@@ -5,6 +5,7 @@ This reference covers the WebSocket session (`/ws/studio`) and the REST API (`/a
 - `backend/app/schemas/crystal.py` (`CrystalStatePayload`);
 - `backend/app/schemas/messages.py` (WebSocket payloads);
 - `backend/app/schemas/api.py` (REST bodies);
+- `backend/app/schemas/library.py` (library and job-queue bodies, §6–§7);
 - the session rules in `backend/app/api/ws_stream.py`.
 
 Field-level detail lives in those files, and in [`design/PROJECT_SPEC.md`](design/PROJECT_SPEC.md) §5 and §10. This page lists every message and what ends it. Every change to the protocol is additive.
@@ -147,10 +148,11 @@ Notes:
 | `HULL_UNAVAILABLE` | REST only |
 | `MP_UNAVAILABLE` | REST only |
 | `MP_NOT_FOUND` | REST only |
+| `NOT_FOUND` | REST only: unknown project / structure / result / job id (404, §6–§7) |
 
 ## 5. REST endpoints
 
-Every endpoint is stateless and none touches a WebSocket session. Errors return `{code, message}` with status:
+Every endpoint in this section is stateless and none touches a WebSocket session (the persistent library and job queue are §6–§7). Errors return `{code, message}` with status:
 - 422: validation or a bad structure;
 - 404: `MP_NOT_FOUND`;
 - 502 / 503: Materials Project or hull unavailable;
@@ -163,10 +165,252 @@ Every endpoint is stateless and none touches a WebSocket session. Errors return 
 | `GET /api/models` | – | `models[]` (`id`, `label`, `description`, `family`, `checkpoint_cached`, `supports_dispersion`, `is_default`), `default_model_id` |
 | `POST /api/import/cif` | `{cif}` | `CrystalStatePayload` (preview only; load it with `LOAD_STRUCTURE`) |
 | `POST /api/export/cif` | `crystal`, `format=cif`/`poscar`/`extxyz`, `symmetrize=true`, `symprec=0.01`, `cell=as_is`/`conventional`/`primitive` (extxyz: `as_is` only) | text attachment |
-| `POST /api/hull/evaluate` | `crystal`, `relax=true`, `model_id?`, `dispersion=false` | `chemsys`, `energy_per_atom`, `e_hull_ev`, `formation_energy_per_atom`, `decomposition`, `references[]`, `candidate_relaxed`, `energy_per_atom_as_given`, `method`. MP references are relaxed with the same model and cached. 503 `HULL_UNAVAILABLE` without `MP_API_KEY` |
+| `POST /api/hull/evaluate` | `crystal`, `relax=true`, `model_id?`, `dispersion=false` | `chemsys`, `energy_per_atom`, `e_hull_ev`, `formation_energy_per_atom`, `decomposition`, `references[]`, `candidate_relaxed`, `energy_per_atom_as_given`, `method`, `phase_diagram` (plot data, §8). MP references are relaxed with the same model and cached. 503 `HULL_UNAVAILABLE` without `MP_API_KEY` |
 | `POST /api/diffraction` | `crystal`, `kind=xray`/`neutron`, `radiation=CuKa`, `wavelength_angstrom?`, `two_theta_min=5`, `two_theta_max=90` | `peaks[]` (2θ, intensity scaled to a maximum of 100, d, hkls) |
 | `GET /api/mp/search?q=` | formula, chemical system (`Li-Fe-O`) or mp-id | `results[]` (MP entries, ≤ 50, sorted by MP E_hull) |
 | `GET /api/mp/structure/{id}` | – | `{entry, cif}` |
 | `POST /api/mp/match` | `{crystal}` | `formula`, `n_searched`, `matches[]` (`entry`, `rms_displacement`) |
 | `POST /api/compare` | `{crystal_a, crystal_b}` | `same_composition`, `structures_match`, rms / max displacement, both space groups, `group_subgroup`, volume per atom and change (%), energy difference (meV/atom, meV/f.u.), `method`. The energies are those carried by the payloads (same model assumed) |
 | `POST /api/ordering` | `cif` (disordered), `max_atoms=64`, `n_candidates=8`, `model_id?`, `dispersion` | ordered `candidates[]` (`cif`, energy, relative energy), `n_enumerated`, `method` |
+
+## 6. Project library (`/api/projects`, `/api/structures`, `/api/results`)
+
+The library persists structures and results across sessions in one SQLite file, `$LATTICEFLOW_DATA_DIR/library.db` (default `~/.latticeflow`). It is shared by every session and the job queue. It never changes a WebSocket session; to work on a stored structure, send `LOAD_STRUCTURE {crystal}`.
+
+Conventions:
+- **Ids** are integers. **Timestamps** are ISO 8601 UTC strings with milliseconds, e.g. `"2026-11-13T09:30:00.123Z"`.
+- **Errors** use the usual `{code, message}` body: 404 `NOT_FOUND` (unknown id), 409 `INVALID_OPERATION` (state conflict), 422 `INVALID_PAYLOAD` (or `INVALID_ELEMENT` / `INVALID_STRUCTURE` for a bad `crystal`).
+- **Deletes** answer 204 with no body.
+
+### 6.1 Projects
+
+A default project "Scratch" (`is_default: true`) always exists. It can be renamed but not deleted.
+
+| Endpoint | Body / query | Response |
+|---|---|---|
+| `GET /api/projects` | – | `Project[]`, default project first, then by id |
+| `POST /api/projects` | `{name}` (1–200 chars) | 201 `Project` |
+| `GET /api/projects/{pid}` | – | `Project` |
+| `PATCH /api/projects/{pid}` | `{name}` | `Project` |
+| `DELETE /api/projects/{pid}` | – | 204. Deletes its structures, results and finished jobs. 409 for the default project or while the project has queued / running jobs |
+| `GET /api/projects/{pid}/export` | – | the export bundle (§6.4) |
+| `POST /api/projects/import?name=` | the export bundle | 201 `Project`: a **new** project (`name` overrides the bundle's name) |
+
+`Project`:
+
+| Field | Type | Notes |
+|---|---|---|
+| `id` | int | |
+| `name` | string | names need not be unique |
+| `is_default` | bool | |
+| `created_at`, `updated_at` | string | `updated_at` changes with any structure or result change in the project |
+| `n_structures` | int | |
+
+### 6.2 Structures
+
+| Endpoint | Body / query | Response |
+|---|---|---|
+| `POST /api/projects/{pid}/structures` | `StructureCreate` | 201 `Structure` (`existing: false`), or 200 the already stored `Structure` (`existing: true`, nothing changed) when the project holds the same structure |
+| `GET /api/projects/{pid}/structures` | – | `StructureListRow[]` by id (no `crystal`) |
+| `GET /api/structures/{sid}` | – | `Structure` |
+| `PATCH /api/structures/{sid}` | `{name?, notes?}` | `Structure` |
+| `DELETE /api/structures/{sid}` | – | 204. Deletes its results; children keep existing with `parent_id: null`. 409 while a queued / running job uses it |
+
+`StructureCreate`:
+
+| Field | Type | Default | Notes |
+|---|---|---|---|
+| `crystal` | `CrystalStatePayload` | required | stored verbatim, exactly as the app sends it |
+| `name` | string? | `crystal.formula` | |
+| `parent_id` | int? | null | must be a structure of the same project (else 422) |
+| `origin` | string | `"import"` | free label. The queue writes `"relax"` and `"follow <q> ν<band>"` (e.g. `"follow R ν0"`) |
+| `notes` | string | `""` | |
+
+`Structure` = `StructureRow` + `crystal` (`CrystalStatePayload`) + `existing` (bool; meaningful on POST only, otherwise false).
+
+`StructureRow`: `id`, `project_id`, `name`, `formula`, `n_atoms`, `spacegroup_symbol`, `spacegroup_number`, `content_hash`, `parent_id` (int or null), `origin`, `notes`, `created_at`, `updated_at`.
+
+`StructureListRow` = `StructureRow` + two fields for a results table:
+- `latest`: object. The newest summary (§6.3) of every kind stored for the structure, merged into one flat object. Summary keys are unique across kinds, so e.g. `{"energy_per_atom_ev": -5.42, "steps": 35, "min_frequency_thz": -0.3, "dynamically_stable": false, "k_gpa": 97.1, ...}`. "Newest" means the latest `created_at` per kind, whatever the model or settings. Empty `{}` when there are no results.
+- `latest_result_ids`: object, kind → id of that newest result (fetch its `data` with `GET /api/results/{id}`).
+
+**Dedup (`content_hash`).** The hash is SHA-256 over:
+- the lattice matrix, rounded to 0.001 Å;
+- the sorted list of (element, u, v, w), with fractional coordinates wrapped into [0, 1) and rounded to 0.001 (a coordinate that rounds to 1.0 counts as 0).
+
+Atom order, energies, forces and bonds do not matter. It is unique per project, so the same structure can be stored in several projects.
+
+### 6.3 Results
+
+| Endpoint | Body / query | Response |
+|---|---|---|
+| `POST /api/structures/{sid}/results` | `ResultCreate` | 201 `ResultRow` (`replaced: false`), or 200 `ResultRow` (`replaced: true`) when it overwrote a result with the same key |
+| `GET /api/structures/{sid}/results?kind=` | optional `kind` filter | `ResultRow[]`, newest first (no `data`) |
+| `GET /api/results/{rid}` | – | `Result` (= `ResultRow` + `data`) |
+| `DELETE /api/results/{rid}` | – | 204 |
+
+`ResultCreate`:
+
+| Field | Type | Default | Notes |
+|---|---|---|---|
+| `kind` | `relax` \| `phonons` \| `elastic` \| `eos` \| `hull` \| `md` \| `diffraction` | required | |
+| `data` | object | required | must validate as that kind's shape (table below), else 422 |
+| `model_id` | string? | the process default model id (`GET /api/models` `default_model_id`) | send the session's model (`MODEL_CHANGED.model_id`) |
+| `dispersion` | bool | false | |
+| `settings` | object | `{}` | the request that produced it, e.g. the `RUN_PHONON_SHAKE_TEST` payload |
+
+**Replacement.** One row exists per key (structure, kind, model_id, dispersion, settings), where `settings` is compared as canonical JSON. A newer result with the same key overwrites that row **in place**: same `id`, new `data`, `summary`, `created_at` and `code_version`.
+
+`ResultRow`:
+
+| Field | Type | Notes |
+|---|---|---|
+| `id`, `structure_id` | int | |
+| `kind` | string | |
+| `model_id` | string | e.g. `"small"`, `"lj-fallback"` |
+| `dispersion` | bool | |
+| `settings` | object | |
+| `summary` | object | computed by the server from `data` (table below) |
+| `created_at` | string | |
+| `code_version` | string | backend version that stored it, e.g. `"0.3.0"` |
+| `replaced` | bool or null | POST only |
+
+`data` has the same JSON as the existing event or response for that calculation, so it can be fed straight back into the existing panes. Large `data` is compressed on disk, but the API always returns plain JSON.
+
+| Kind | `data` is the payload of | `summary` keys |
+|---|---|---|
+| `relax` | the **final** `RELAXATION_FRAME` (`{step, converged, final: true, crystal}`). A `FOLLOW_INSTABILITY` result uses the same shape | `energy_per_atom_ev` (crystal.energy_per_atom), `max_force_ev_a` (crystal.max_force), `pressure_gpa` (crystal.pressure_gpa), `relax_converged` (converged), `steps` (step) |
+| `phonons` | `PHONON_ANALYSIS_COMPLETE` | `min_frequency_thz`, `imaginary_mode_count`, `dynamically_stable` (is_dynamically_stable), `supercell` (string such as `"3x3x3"`, or null) |
+| `elastic` | `ELASTIC_TENSOR_RESULT` | `k_vrh_gpa`, `g_vrh_gpa`, `born_stable` |
+| `eos` | `BULK_MODULUS_RESULT` | `k_gpa`, `v0` |
+| `hull` | the `POST /api/hull/evaluate` response (`HullEvaluateResponse`, including `phase_diagram`) | `e_hull_ev`, `formation_energy_ev` (formation_energy_per_atom) |
+| `md` | `MD_COMPLETE` | `temperature_k` (mean_temperature_k), plus `diffusion_<El>_cm2_s` per element of `diffusion_coefficients_cm2_s` (e.g. `diffusion_Li_cm2_s`) |
+| `diffraction` | the `POST /api/diffraction` response | `n_peaks`, `strongest_peak_two_theta` |
+
+Numeric summary values are `null` when not finite or missing.
+
+### 6.4 Export bundle
+
+`GET /api/projects/{pid}/export` returns one self-contained JSON object. Jobs are not exported.
+
+```json
+{
+  "format": "latticeflow-project",
+  "version": 1,
+  "exported_at": "2026-11-13T09:30:00.123Z",
+  "code_version": "0.3.0",
+  "project": {"name": "Perovskites", "created_at": "..."},
+  "structures": [{"id": 3, "name": "SrTiO3", "formula": "SrTiO3", "content_hash": "...", "parent_id": null,
+                  "origin": "import", "notes": "", "created_at": "...", "crystal": {}}],
+  "results": [{"structure_id": 3, "kind": "phonons", "model_id": "small", "dispersion": false, "settings": {},
+               "summary": {}, "data": {}, "created_at": "...", "code_version": "0.3.0"}]
+}
+```
+
+Ids inside the bundle are only references within the bundle. `POST /api/projects/import` creates a new project with new ids, keeps the `parent_id` lineage, recomputes hashes and summaries, and gives imported results the import time as `created_at`. It answers 422 if `format` is not `latticeflow-project` or `version` is newer than 1.
+
+## 7. Job queue (`/api/jobs`)
+
+The queue runs calculations in the background and writes their results into the library. It has one worker thread for the whole server.
+
+**Chains.** `POST /api/jobs` creates one **chain** per structure. A chain is one job per step, sharing a `chain_id`, with `step_index` 0..`n_steps`-1.
+- Each step runs on the output structure of the last `relax` / `follow` step before it, or on the chain's starting structure. A job's `structure_id` is its input; for later steps it is updated when an earlier `relax` / `follow` finishes.
+- A failed step marks the remaining queued steps of its chain `failed`; a cancelled step marks them `cancelled`. In both cases `error` says "previous step (job N) failed/was cancelled". Other chains continue.
+- A `skipped` step lets the chain continue on the same structure.
+
+**Order and priority.**
+- The worker runs the queued job with the lowest `position` whose previous chain step is `done` or `skipped`.
+- Interactive work comes first. While any WebSocket session is streaming, no job starts, and a running job pauses at its next checkpoint. Its `message` is then `"paused: an interactive session is computing"` and `GET /api/jobs` reports `paused: true`.
+- Model calls use the same engines as the sessions (`model_id` / `dispersion`; null = process default).
+
+**Cancellation.**
+- A queued job is cancelled immediately.
+- A running job gets `message: "cancelling"` and becomes `cancelled` at its next checkpoint: a relaxation step, a phonon force chunk or an elastic strain. EOS and hull steps are checked only before and after they run.
+
+**Restart.** On startup, jobs left `running` go back to `queued` (`message: "requeued after restart"`). A server shutdown also requeues the running job.
+
+**Status values:** `queued`, `running`, `done`, `failed`, `cancelled`, `skipped`. The finished statuses are `done`, `failed`, `cancelled` and `skipped`.
+
+| Endpoint | Body / query | Response |
+|---|---|---|
+| `POST /api/jobs` | `JobCreate` | 201 `Job[]`: every created job, chain by chain in step order |
+| `GET /api/jobs?project_id=&active=` | `project_id` optional; `active=true` = queued + running, `false` = finished, omitted = all | `{jobs: Job[], paused: bool}`, ordered by `position`. Cheap; poll it every ~1.5 s |
+| `GET /api/jobs/{id}` | – | `Job` |
+| `POST /api/jobs/{id}/cancel` | – | `Job` after the change. 409 if already finished |
+| `POST /api/jobs/{id}/move` | `{position}` (int ≥ 0) | `Job`. `position` is the target index in the list of *queued* jobs (0 = runs next; clamped to the end). 409 unless queued |
+| `DELETE /api/jobs/{id}` | – | 204. 409 unless finished |
+| `POST /api/jobs/clear-finished?project_id=` | `project_id` optional | `{deleted: int}`: removes finished jobs (the results and structures stay) |
+
+`JobCreate`:
+
+| Field | Type | Default | Notes |
+|---|---|---|---|
+| `project_id` | int | required | |
+| `structure_ids` | int[] (1–500) | required | structures of that project (else 422) |
+| `steps` | `JobStep[]` (1–20) | required | |
+| `model_id` | string? | null (process default) | an id from `GET /api/models` |
+| `dispersion` | bool | false | |
+
+`JobStep`: `{kind, settings = {}, only_if_unstable = false}`. Omitted settings take the **interactive UI defaults**. The job stores the full, normalised settings.
+
+| `kind` | `settings` (defaults) | Writes |
+|---|---|---|
+| `relax` | `START_RELAXATION` fields: `fmax=0.02`, `max_steps=100`, `relax_cell=true`, `fix_symmetry=false`, `pressure_gpa=0`, `stress_tol_gpa=0.05` (ignored without `relax_cell`), `optimizer=FIRE` | a child structure (`origin "relax"`, `parent_id` = input) and a `relax` result **on the child**. If the relaxed structure dedups to an existing structure, that one is used. Divergence fails the step (`RELAXATION_DIVERGED: …`) |
+| `phonons` | `RUN_PHONON_SHAKE_TEST` fields: `cell_mode=primitive`, `min_supercell_length=10` (dropped when you give `supercell_dim`), `displacement_distance=0.01` | a `phonons` result on the input |
+| `elastic` | `COMPUTE_ELASTIC_TENSOR` fields: `max_strain=0.01`, `n_strains=4`, `relax_ions=true`, `fmax=0.01` | `elastic` result |
+| `eos` | `COMPUTE_BULK_MODULUS` fields: `strain_window=0.02`, `n_points=5` | `eos` result |
+| `hull` | `relax=true` (as `POST /api/hull/evaluate`) | `hull` result. Needs `MP_API_KEY` or cached references, else the step fails (`HULL_UNAVAILABLE: …`) |
+| `follow` | `amplitude=0.1`, `fmax=0.005`, `max_steps=300` | see below |
+
+How `follow` works:
+- It must come after a `phonons` step with no `relax` / `follow` in between; otherwise `POST` answers 422.
+- It follows the softest imaginary mode among the labelled high-symmetry modes (`eigenmodes`) whose commensurate supercell fits `max_atoms`, exactly like `FOLLOW_INSTABILITY`.
+- It writes a child structure (`origin "follow <q> ν<band>"`, e.g. `"follow R ν0"`; Γ written as `Γ`) and a `relax` result on the child. That result's settings add `follow: true`, `q_index`, `band_index`, `q_label` and `frequency_thz`.
+- If the phonons are dynamically stable, the step is `skipped` when `only_if_unstable` is true, else `failed` (`MODE_NOT_IMAGINARY: …`).
+
+`only_if_unstable` on any other kind is a 422.
+
+`Job`:
+
+| Field | Type | Notes |
+|---|---|---|
+| `id` | int | |
+| `project_id` | int | |
+| `structure_id` | int or null | input structure of this step (null if it was deleted) |
+| `chain_id` | string | 32 hex characters |
+| `step_index`, `n_steps` | int | |
+| `kind` | string | step kind |
+| `settings` | object | full settings |
+| `only_if_unstable` | bool | |
+| `model_id` | string or null | as requested (null = default) |
+| `dispersion` | bool | |
+| `status` | string | see above |
+| `progress` | float 0..1 | relaxations: step / max_steps; elastic: strains done; phonons stay 0 until done (the `message` counts force evaluations); 1 when finished |
+| `message` | string | human-readable state, e.g. `"step 12"`, `"converged in 35 steps"`, `"unstable (min -2.31 THz)"`, `"skipped: the phonons are dynamically stable"` |
+| `error` | string or null | for `failed` (prefixed with an error code where one applies, e.g. `"STRUCTURE_TOO_LARGE: …"`) and `cancelled` |
+| `result_id` | int or null | the result written (for `relax` / `follow`, it lives on `output_structure_id`). A later identical result overwrites it in place (§6.3), so the id stays valid |
+| `output_structure_id` | int or null | `relax` / `follow` only |
+| `position` | int | queue order (global across projects) |
+| `created_at`, `started_at`, `finished_at` | string or null | |
+
+## 8. Phase-diagram data (`POST /api/hull/evaluate` → `phase_diagram`)
+
+The hull response (and a stored `hull` result's `data`) carries `phase_diagram`. It holds everything a binary or ternary formation-energy plot needs. The MP calls and the reference cache are unchanged.
+
+| Field | Type | Notes |
+|---|---|---|
+| `elements` | string[] | alphabetical, the same as `chemsys` |
+| `entries` | `PhaseDiagramPoint[]` | one per reference phase, in the same order as `references` |
+| `candidate` | `PhaseDiagramPoint` | the evaluated structure (it is not part of the hull) |
+| `facets` | int[][] | hull simplices as indices into `entries`, each sorted: index pairs (tie lines) for a binary, triples for a ternary. Empty for a single element |
+
+`PhaseDiagramPoint`:
+
+| Field | Type | Notes |
+|---|---|---|
+| `material_id` | string or null | MP id; null for the candidate |
+| `formula` | string | reduced formula |
+| `composition` | object | element → atom fraction for **every** element of `elements` (0 when absent; sums to 1). For a binary A-B use `composition[B]` as x; for a ternary use barycentric coordinates |
+| `formation_energy_per_atom` | float | eV/atom relative to the relaxed elemental references (elements: 0) |
+| `e_above_hull` | float | eV/atom; 0 for hull vertices. For the candidate it equals `e_hull_ev` (negative = below the reference hull) |
+| `on_hull` | bool | references: a stable vertex of the hull; candidate: `e_hull_ev ≤ 1e-6` |

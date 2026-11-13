@@ -9,15 +9,21 @@
   ``requires_mace`` marker so ``-m "not requires_mace"`` deselects it.
 
 Engines built here are independent of the process-wide singleton.
+
+``LATTICEFLOW_DATA_DIR`` is pointed at a throw-away directory before anything
+is imported, so no test can write the real ``~/.latticeflow/library.db``.
 """
 
 from __future__ import annotations
 
 import os
+import tempfile
 
-import pytest
+os.environ["LATTICEFLOW_DATA_DIR"] = tempfile.mkdtemp(prefix="latticeflow-test-data-")
 
-from app.core.umlip_engine import UMLIPEngine
+import pytest  # noqa: E402
+
+from app.core.umlip_engine import UMLIPEngine  # noqa: E402
 
 
 @pytest.fixture(scope="session")

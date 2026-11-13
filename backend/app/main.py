@@ -7,7 +7,8 @@ Router contract (PM-owned):
 
 Startup blocks until the uMLIP engine is loaded and has run one warm-up single
 point (CUDA context, MACE graph build), so the first client structure is fast
-(PROJECT_SPEC.md §8.1).
+(PROJECT_SPEC.md §8.1). Then the job-queue worker (``app.core.jobs``) starts; it is
+stopped (its running job requeued) on shutdown.
 """
 
 from __future__ import annotations
@@ -20,7 +21,9 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from app.api import routes, ws_stream
+from app import __version__
+from app.api import library_routes, routes, ws_stream
+from app.core import jobs
 from app.core.umlip_engine import UMLIPEngine
 from app.presets import DEFAULT_PRESET_ID, load_preset
 
@@ -51,10 +54,15 @@ async def lifespan(app: FastAPI):
         engine.dtype,
         f" (fallback reason: {engine.load_error})" if engine.load_error else "",
     )
-    yield
+    queue = jobs.get_queue()  # opens LATTICEFLOW_DATA_DIR/library.db, requeues jobs left running
+    queue.start()
+    try:
+        yield
+    finally:
+        await asyncio.to_thread(queue.stop)
 
 
-app = FastAPI(title="LatticeFlow Studio", version="0.3.0", lifespan=lifespan)
+app = FastAPI(title="LatticeFlow Studio", version=__version__, lifespan=lifespan)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=_cors_origins(),
@@ -65,4 +73,5 @@ app.add_middleware(
 )
 routes.register_error_handlers(app)
 app.include_router(routes.router)
+app.include_router(library_routes.router)
 app.include_router(ws_stream.router)

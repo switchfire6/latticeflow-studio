@@ -193,6 +193,15 @@ def test_below_hull_is_negative(fallback_engine, cache):
     assert res.e_hull_ev < 0
     assert res.e_hull_ev == pytest.approx(res.formation_energy_per_atom, abs=1e-9)  # hull = elements only
     assert res.decomposition == pytest.approx({"Na": 0.5, "Cl2": 0.5})
+    # phase-diagram plot data: the elemental references sit on the hull at E_f = 0, joined by one facet
+    pdd = res.phase_diagram
+    assert pdd.elements == ["Cl", "Na"] and len(pdd.entries) == len(res.references)
+    elemental = [i for i, e in enumerate(pdd.entries) if max(e.composition.values()) == 1.0 and e.on_hull]
+    assert len(elemental) == 2 and all(abs(pdd.entries[i].formation_energy_per_atom) < 1e-9 for i in elemental)
+    assert pdd.facets == [sorted(elemental)]
+    assert pdd.candidate.composition == pytest.approx({"Cl": 0.5, "Na": 0.5})
+    assert pdd.candidate.formation_energy_per_atom == pytest.approx(res.formation_energy_per_atom)
+    assert pdd.candidate.on_hull and pdd.candidate.material_id is None
 
 
 def load_rocksalt_nacl(a: float = 5.64) -> Atoms:

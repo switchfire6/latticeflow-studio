@@ -15,6 +15,7 @@ LATTICEFLOW_MACE_DOWNLOAD_TIMEOUT  total wall-clock budget (s) for a first-time 
 LATTICEFLOW_MACE_ALLOW_DOWNLOAD    ``1`` (default) | ``0``: never touch the network, use the local cache only
 MP_API_KEY                         optional Materials Project key (convex-hull lookup, Phase 5)
 LATTICEFLOW_HULL_CACHE_DIR         relaxed hull reference cache (default ~/.cache/latticeflow/hull), read by app/core/hull_analyzer.py
+LATTICEFLOW_DATA_DIR               project library + job queue (library.db; default ~/.latticeflow), read by app/core/library.py
 LATTICEFLOW_CORS_ORIGINS           comma-separated allowed origins (default: Vite dev server on :5173), read by app/main.py
 LATTICEFLOW_MAX_ATOMS              studio-wide atoms-per-structure limit (default 128; §7.7)
 LATTICEFLOW_PHONON_MAX_ATOMS       phonon shake-test atoms-per-cell limit (default 64; §7.7)

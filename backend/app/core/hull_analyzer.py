@@ -73,7 +73,7 @@ from typing import TYPE_CHECKING, Any, Callable, Dict, Iterable, List, Optional,
 import numpy as np
 from ase import Atoms
 
-from app.schemas.api import HullEvaluateResponse, HullReferencePhase
+from app.schemas.api import HullEvaluateResponse, HullReferencePhase, PhaseDiagramData, PhaseDiagramPoint
 
 if TYPE_CHECKING:  # pragma: no cover
     from pymatgen.core import Structure
@@ -760,7 +760,52 @@ def evaluate_hull(
         umlip_backend=engine.backend_name,
         candidate_relaxed=candidate_relaxed,
         energy_per_atom_as_given=e_as_given,
+        phase_diagram=_phase_diagram_data(pd, refset, comp, float(formation), float(e_hull)),
     )
+
+
+def _phase_diagram_data(pd, refset: ReferenceSet, comp, formation: float, e_hull: float) -> PhaseDiagramData:
+    """Plot data: every reference as (fractional composition, formation energy, on hull), plus the candidate.
+
+    ``pd`` is ``refset.phase_diagram()`` (PDEntry ``attribute`` = material_id).
+    """
+    elements = sorted(refset.chemsys.split("-"))
+
+    def fractions(c) -> Dict[str, float]:
+        frac = c.fractional_composition
+        return {el: float(frac[el]) for el in elements}
+
+    by_id = {e.attribute: e for e in pd.all_entries}          # PDEntry.attribute = material_id
+    index = {r.material_id: i for i, r in enumerate(refset.references)}
+    stable = {e.attribute for e in pd.stable_entries}
+    entries = []
+    for r in refset.references:
+        e = by_id[r.material_id]
+        entries.append(PhaseDiagramPoint(
+            material_id=r.material_id,
+            formula=r.formula,
+            composition=fractions(e.composition),
+            formation_energy_per_atom=float(pd.get_form_energy_per_atom(e)),
+            e_above_hull=max(0.0, float(pd.get_e_above_hull(e))),
+            on_hull=r.material_id in stable,
+        ))
+    facets: List[List[int]] = []
+    if len(elements) > 1:
+        for facet in pd.facets:
+            try:
+                idx = [index[pd.qhull_entries[k].attribute] for k in facet]
+            except (KeyError, IndexError):
+                continue
+            facets.append(sorted(idx))
+    candidate = PhaseDiagramPoint(
+        material_id=None,
+        formula=comp.reduced_formula,
+        composition=fractions(comp),
+        formation_energy_per_atom=formation,
+        e_above_hull=e_hull,
+        on_hull=e_hull <= 1e-6,
+    )
+    return PhaseDiagramData(elements=elements, entries=entries, candidate=candidate, facets=facets)
 
 
 def _score_relaxed_candidate(atoms: Atoms, engine: "UMLIPEngine") -> Tuple[float, Optional[float], bool, str]:

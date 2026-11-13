@@ -59,6 +59,25 @@ class HullReferencePhase(BaseModel):
     energy_per_atom: float              # eV/atom, evaluated with the studio's uMLIP after relaxation
 
 
+class PhaseDiagramPoint(BaseModel):
+    """One point of the formation-energy phase diagram (docs/protocol.md §8)."""
+
+    material_id: Optional[str] = None   # MP id of a reference; None for the evaluated structure
+    formula: str                        # reduced formula
+    composition: Dict[str, float]       # atom fraction of every element of `elements` (0 when absent; sums to 1)
+    formation_energy_per_atom: float    # eV/atom vs. the relaxed elemental references
+    e_above_hull: float                 # eV/atom above the reference hull (0 on it; candidate: = e_hull_ev)
+    on_hull: bool                       # reference: a stable vertex; candidate: e_hull_ev <= 1e-6
+
+
+class PhaseDiagramData(BaseModel):
+    elements: List[str]                 # alphabetical (= chemsys order)
+    entries: List[PhaseDiagramPoint]    # one per reference phase (same order as `references`)
+    candidate: PhaseDiagramPoint        # the evaluated structure (not part of the hull)
+    facets: List[List[int]]             # hull simplices as indices into `entries` (lines for a binary,
+                                        # triangles for a ternary); empty for a unary
+
+
 class HullEvaluateResponse(BaseModel):
     chemsys: str                        # e.g. "Li-O-Ti" (alphabetical, pymatgen convention)
     energy_per_atom: float              # candidate, eV/atom, of the scored structure (relaxed when candidate_relaxed)
@@ -72,6 +91,8 @@ class HullEvaluateResponse(BaseModel):
     # ---- Phase A
     candidate_relaxed: bool = False                    # the scored candidate is the relaxed structure
     energy_per_atom_as_given: Optional[float] = None   # single point of the structure as sent (when relaxed)
+    # ---- phase-diagram plot data (additive)
+    phase_diagram: Optional[PhaseDiagramData] = None
 
 
 class ErrorResponse(BaseModel):
