@@ -128,11 +128,12 @@ All settings are optional; see [`.env.example`](.env.example).
 | `LATTICEFLOW_CORS_ORIGINS` | Vite on :5173 | comma-separated allowed origins |
 | `LATTICEFLOW_MAX_ATOMS` | `128` | atoms per structure (load, supercell, add atom, follow instability) |
 | `LATTICEFLOW_PHONON_MAX_ATOMS` | `64` | atoms per cell for a phonon calculation |
+| `LATTICEFLOW_MAX_IMPORT_MB` | `50` | largest project bundle accepted by import (413 above it) |
 | `VITE_BACKEND_URL` (frontend) | – (Vite proxy) | backend URL for the frontend |
 
 Fixed limits: 600 atoms per phonon supercell, 64 atoms per generated candidate, elements up to Z = 89.
 
-The backend has no authentication. It is meant to run on your own machine or a trusted network; don't expose it to the internet as is.
+The backend has no authentication: anyone who can reach its port can read and modify the project library, import projects and queue GPU jobs. It is meant to run on your own machine or a trusted network; don't expose it to the internet as is. The Docker setup binds to all interfaces inside the container, so `docker-compose.yml` publishes ports 8000 and 5173 on `127.0.0.1` only; keep them there.
 
 ## Tests
 

@@ -101,3 +101,15 @@ def test_library_crud_dedup_replace_and_round_trip(client, si):
     assert client.get(f"/api/structures/{child['id']}").json()["parent_id"] is None
     assert client.delete(f"/api/projects/{pid}").status_code == 204
     assert client.get(f"/api/projects/{pid}").json()["code"] == "NOT_FOUND"
+
+
+def test_import_over_size_limit_is_413(client, monkeypatch):
+    monkeypatch.setattr(library_routes, "max_import_bytes", lambda: 1024)
+    big = {"format": "latticeflow-project", "version": 1, "pad": "x" * 2048}
+    r = client.post("/api/projects/import", json=big)
+    assert r.status_code == 413 and r.json()["code"] == "INVALID_PAYLOAD"
+    # without Content-Length (chunked upload): the read size is checked too
+    r = client.post("/api/projects/import", content=iter([b'{"pad": "', b"x" * 2048, b'"}']),
+                    headers={"content-type": "application/json"})
+    assert r.status_code == 413
+    assert len(client.get("/api/projects").json()) == 1

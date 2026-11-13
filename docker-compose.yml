@@ -17,8 +17,8 @@ services:
     environment:
       LATTICEFLOW_CORS_ORIGINS: ${LATTICEFLOW_CORS_ORIGINS:-http://localhost:5173,http://127.0.0.1:5173}
     ports:
-      - "8000:8000"   # REST + WebSocket
-      - "5173:5173"   # published here because the frontend joins this network namespace
+      - "127.0.0.1:8000:8000"   # REST + WebSocket (localhost only: no authentication)
+      - "127.0.0.1:5173:5173"   # published here because the frontend joins this network namespace
     volumes:
       - model-cache:/root/.cache   # MACE checkpoint + hull reference cache survive rebuilds
     healthcheck:

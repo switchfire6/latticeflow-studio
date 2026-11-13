@@ -194,7 +194,7 @@ A default project "Scratch" (`is_default: true`) always exists. It can be rename
 | `PATCH /api/projects/{pid}` | `{name}` | `Project` |
 | `DELETE /api/projects/{pid}` | – | 204. Deletes its structures, results and finished jobs. 409 for the default project or while the project has queued / running jobs |
 | `GET /api/projects/{pid}/export` | – | the export bundle (§6.4) |
-| `POST /api/projects/import?name=` | the export bundle | 201 `Project`: a **new** project (`name` overrides the bundle's name) |
+| `POST /api/projects/import?name=` | the export bundle | 201 `Project`: a **new** project (`name` overrides the bundle's name). 413 `INVALID_PAYLOAD` when the body is larger than `LATTICEFLOW_MAX_IMPORT_MB` (default 50 MB) |
 
 `Project`:
 
@@ -307,7 +307,7 @@ Numeric summary values are `null` when not finite or missing.
 }
 ```
 
-Ids inside the bundle are only references within the bundle. `POST /api/projects/import` creates a new project with new ids, keeps the `parent_id` lineage, recomputes hashes and summaries, and gives imported results the import time as `created_at`. It answers 422 if `format` is not `latticeflow-project` or `version` is newer than 1.
+Ids inside the bundle are only references within the bundle. `POST /api/projects/import` creates a new project with new ids, keeps the `parent_id` lineage, recomputes hashes and summaries, and gives imported results the import time as `created_at`. It answers 422 if `format` is not `latticeflow-project` or `version` is newer than 1, and 413 if the body is larger than `LATTICEFLOW_MAX_IMPORT_MB` (default 50; checked against `Content-Length` and against the bytes received, before the bundle is parsed).
 
 ## 7. Job queue (`/api/jobs`)
 

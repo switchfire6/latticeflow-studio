@@ -208,6 +208,30 @@ export async function saveCurrent(name?: string): Promise<void> {
   }
 }
 
+export async function renameStructure(sid: number, name: string): Promise<void> {
+  try {
+    await api.updateStructure(sid, { name: name.trim() });
+    await refreshStructures();
+  } catch (e) {
+    toast("warning", "Structure not renamed", errorText(e));
+  }
+}
+
+/** Delete a stored structure and its results (the server keeps its children, with `parent_id: null`). */
+export async function deleteStructure(sid: number): Promise<void> {
+  try {
+    await api.deleteStructure(sid);
+    for (const [k, v] of savedByVersion) if (v === sid) savedByVersion.delete(k);
+    const lib = useLibrary.getState();
+    if (lib.link?.structureId === sid) lib.setLink(null);
+    if (lib.phononOverlay?.structureId === sid) lib.setPhononOverlay(null);
+    await refreshStructures();
+    await refreshProjects();
+  } catch (e) {
+    toast("warning", "Structure not deleted", errorText(e));
+  }
+}
+
 // ------------------------------------------------------------------ auto-save
 interface SaveRequest {
   kind: ResultKind;

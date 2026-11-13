@@ -3,18 +3,22 @@
 ``router`` (prefix ``/api``) is mounted by ``app.main``; it relies on
 ``routes.register_error_handlers`` for the ``ErrorResponse`` body. Errors:
 404 ``NOT_FOUND`` (unknown id), 409 ``INVALID_OPERATION`` (state conflict, e.g.
-deleting the default project or a running job), 422 ``INVALID_PAYLOAD`` /
-structure codes. Test seams: the ``library_dep`` and ``queue_dep`` dependencies.
+deleting the default project or a running job), 413 ``INVALID_PAYLOAD`` (an import
+bundle over ``LATTICEFLOW_MAX_IMPORT_MB``), 422 ``INVALID_PAYLOAD`` / structure codes.
+Test seams: the ``library_dep`` and ``queue_dep`` dependencies.
 """
 
 from __future__ import annotations
 
+import json
 from typing import Any, Dict, List, Optional
 
-from fastapi import APIRouter, Depends, Query, Response
+from fastapi import APIRouter, Depends, Query, Request, Response
 from pydantic import ValidationError
+from starlette.concurrency import run_in_threadpool
 
 from app.api.routes import ApiError, _payload_atoms
+from app.config import DEFAULT_MAX_IMPORT_MB, get_settings
 from app.core import jobs as jobs_core
 from app.core import library as lib_core
 from app.schemas.api import DiffractionResponse, HullEvaluateResponse
@@ -105,13 +109,52 @@ def export_project(pid: int, lib: lib_core.Library = Depends(library_dep)) -> Di
     return _call(lib.export_project, pid)
 
 
-@router.post("/projects/import", response_model=Project, status_code=201)
-def import_project(bundle: Dict[str, Any], name: Optional[str] = Query(default=None),
-                   lib: lib_core.Library = Depends(library_dep)):
+def max_import_bytes() -> int:
+    """Largest accepted import body (``LATTICEFLOW_MAX_IMPORT_MB``, default 50 MB)."""
+    try:
+        mb = get_settings().max_import_mb
+    except ValueError:  # malformed environment: fall back to the default
+        mb = DEFAULT_MAX_IMPORT_MB
+    return int(mb * 1024 * 1024)
+
+
+def _too_large(limit: int) -> ApiError:
+    return ApiError(413, "INVALID_PAYLOAD", f"import bundle exceeds the {limit / (1024 * 1024):g} MB limit "
+                                            "(LATTICEFLOW_MAX_IMPORT_MB)")
+
+
+def _import_bundle(lib: lib_core.Library, body: bytes, name: Optional[str]):
+    try:
+        bundle = json.loads(body)
+    except ValueError as exc:
+        raise ApiError(422, "INVALID_PAYLOAD", f"body is not JSON: {exc}") from exc
+    if not isinstance(bundle, dict):
+        raise ApiError(422, "INVALID_PAYLOAD", "body must be a JSON object (the export bundle)")
     try:
         return _call(lib.import_project, bundle, name)
     except (KeyError, TypeError, ValueError) as exc:
         raise ApiError(422, "INVALID_PAYLOAD", f"malformed bundle: {type(exc).__name__}: {exc}") from exc
+
+
+@router.post("/projects/import", response_model=Project, status_code=201,
+             openapi_extra={"requestBody": {"required": True, "content": {
+                 "application/json": {"schema": {"type": "object", "title": "Bundle"}}}}})
+async def import_project(request: Request, name: Optional[str] = Query(default=None),
+                         lib: lib_core.Library = Depends(library_dep)):
+    # The body is read here, in chunks, so an oversized upload is refused before it is buffered:
+    # first by Content-Length, then by the bytes actually received (chunked or lying clients).
+    limit = max_import_bytes()
+    declared = request.headers.get("content-length")
+    if declared is not None and declared.isdigit() and int(declared) > limit:
+        raise _too_large(limit)
+    chunks: List[bytes] = []
+    size = 0
+    async for chunk in request.stream():
+        size += len(chunk)
+        if size > limit:
+            raise _too_large(limit)
+        chunks.append(chunk)
+    return await run_in_threadpool(_import_bundle, lib, b"".join(chunks), name)
 
 
 # ---------------------------------------------------------------- structures

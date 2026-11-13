@@ -19,6 +19,7 @@ LATTICEFLOW_DATA_DIR               project library + job queue (library.db; defa
 LATTICEFLOW_CORS_ORIGINS           comma-separated allowed origins (default: Vite dev server on :5173), read by app/main.py
 LATTICEFLOW_MAX_ATOMS              studio-wide atoms-per-structure limit (default 128; §7.7)
 LATTICEFLOW_PHONON_MAX_ATOMS       phonon shake-test atoms-per-cell limit (default 64; §7.7)
+LATTICEFLOW_MAX_IMPORT_MB          largest accepted POST /api/projects/import body in MB (default 50), read by app/api/library_routes.py
 """
 
 from __future__ import annotations
@@ -34,6 +35,8 @@ _TRUE = {"1", "true", "yes", "on"}
 #: Defaults of the configurable size limits (Phase D, §7.7).
 DEFAULT_MAX_ATOMS = 128
 DEFAULT_PHONON_MAX_ATOMS = 64
+#: Default size limit of a project bundle import (MB).
+DEFAULT_MAX_IMPORT_MB = 50.0
 
 
 @dataclass(frozen=True)
@@ -47,6 +50,7 @@ class Settings:
     mp_api_key: Optional[str] = None
     max_atoms: int = DEFAULT_MAX_ATOMS
     phonon_max_atoms: int = DEFAULT_PHONON_MAX_ATOMS
+    max_import_mb: float = DEFAULT_MAX_IMPORT_MB
 
     def __post_init__(self) -> None:
         if self.dtype not in _VALID_DTYPES:
@@ -59,6 +63,8 @@ class Settings:
             raise ValueError("LATTICEFLOW_MAX_ATOMS must be >= 1")
         if self.phonon_max_atoms < 1:
             raise ValueError("LATTICEFLOW_PHONON_MAX_ATOMS must be >= 1")
+        if not self.max_import_mb > 0:
+            raise ValueError("LATTICEFLOW_MAX_IMPORT_MB must be > 0")
 
     @classmethod
     def from_env(cls, env: Optional[Mapping[str, str]] = None) -> "Settings":
@@ -78,6 +84,7 @@ class Settings:
             mp_api_key=env.get("MP_API_KEY") or None,
             max_atoms=int(get("LATTICEFLOW_MAX_ATOMS", str(DEFAULT_MAX_ATOMS))),
             phonon_max_atoms=int(get("LATTICEFLOW_PHONON_MAX_ATOMS", str(DEFAULT_PHONON_MAX_ATOMS))),
+            max_import_mb=float(get("LATTICEFLOW_MAX_IMPORT_MB", str(DEFAULT_MAX_IMPORT_MB))),
         )
 
 

@@ -1,8 +1,8 @@
 /**
  * Library card of the left sidebar (protocol §6): project switcher with
  * create / rename / delete, "Save current structure", the active project's
- * structures (lineage-indented by parent_id; click = open), auto-save, and
- * bundle export / import. The results table and scatter live in the
+ * structures (lineage-indented by parent_id; click = open; rename / delete on
+ * row hover), auto-save, and bundle export / import. The results table and scatter live in the
  * "results" dock pane.
  */
 import { Check, Download, FolderPlus, Loader2, Pencil, Save, Table2, Trash2, Upload, X } from "lucide-react";
@@ -11,20 +11,24 @@ import { showPane } from "../../services/dockActions";
 import {
   createProject,
   deleteProject,
+  deleteStructure,
   exportBundle,
   importBundle,
   openStructure,
   refreshStructures,
   renameProject,
+  renameStructure,
   saveCurrent,
   selectProject,
 } from "../../services/libraryActions";
 import { useLibrary } from "../../store/libraryStore";
 import { useCrystalStore } from "../../store/useCrystalStore";
+import type { StructureListRow } from "../../types/library";
 import { lineageOrder } from "../../utils/library";
 import { Button, CollapsibleCard, FormulaText, cx, inputCls } from "./ui";
 
 const iconBtn = "grid h-7 w-7 shrink-0 place-items-center rounded-ctl text-fg-3 hover:bg-hover hover:text-fg disabled:opacity-30";
+const rowBtn = "grid h-5 w-5 shrink-0 place-items-center rounded-ctl text-fg-4 hover:bg-hover hover:text-fg";
 const textBtn = "flex h-6 shrink-0 items-center gap-1 rounded-ctl px-1.5 text-2xs text-fg-3 hover:bg-hover hover:text-fg disabled:opacity-30";
 
 function ProjectBar() {
@@ -101,6 +105,49 @@ function ProjectBar() {
   );
 }
 
+function RenameRow({ row, depth, onDone }: { row: StructureListRow; depth: number; onDone(): void }) {
+  const [draft, setDraft] = useState(row.name);
+  const commit = () => {
+    const name = draft.trim();
+    if (name && name !== row.name) void renameStructure(row.id, name);
+    onDone();
+  };
+  return (
+    <div className="flex items-center gap-0.5 py-0.5 pr-1" style={{ paddingLeft: 4 + Math.min(depth, 5) * 12 }}>
+      <input
+        autoFocus
+        className={cx(inputCls, "py-0.5 text-xs")}
+        aria-label="Structure name"
+        value={draft}
+        maxLength={200}
+        onChange={(e) => setDraft(e.target.value)}
+        onFocus={(e) => e.target.select()}
+        onKeyDown={(e) => {
+          if (e.key === "Enter") commit();
+          if (e.key === "Escape") onDone();
+        }}
+      />
+      <button type="button" className={rowBtn} title="OK" onClick={commit} disabled={!draft.trim()}>
+        <Check size={12} />
+      </button>
+      <button type="button" className={rowBtn} title="Cancel" onClick={onDone}>
+        <X size={12} />
+      </button>
+    </div>
+  );
+}
+
+function confirmDelete(row: StructureListRow, rows: StructureListRow[]): boolean {
+  const kinds = Object.keys(row.latest_result_ids);
+  const children = rows.filter((r) => r.parent_id === row.id).length;
+  const lines = [
+    `Delete structure “${row.name}”?`,
+    kinds.length ? `All its stored results (${kinds.join(", ")}) are deleted with it.` : "It has no stored results.",
+  ];
+  if (children) lines.push(`Its ${children} derived structure${children === 1 ? " is" : "s are"} kept and moved to the top level.`);
+  return window.confirm(lines.join("\n\n"));
+}
+
 function StructureList() {
   const rows = useLibrary((s) => s.structures);
   const loading = useLibrary((s) => s.structuresLoading);
@@ -108,6 +155,7 @@ function StructureList() {
   const stateVersion = useCrystalStore((s) => s.stateVersion);
   const connected = useCrystalStore((s) => s.connection === "open");
   const items = useMemo(() => lineageOrder(rows), [rows]);
+  const [editing, setEditing] = useState<number | null>(null);
   const currentId = link && link.stateVersion === stateVersion ? link.structureId : null;
   if (!rows.length) {
     return <p className="py-1 text-xs text-fg-4">{loading ? "Loading…" : "No structures yet. Save the current one, or run a calculation with auto-save on."}</p>;
@@ -117,14 +165,21 @@ function StructureList() {
       {items.map(({ row, depth }) => {
         const n = Object.keys(row.latest_result_ids).length;
         const cur = row.id === currentId;
+        if (editing === row.id) {
+          return (
+            <li key={row.id}>
+              <RenameRow row={row} depth={depth} onDone={() => setEditing(null)} />
+            </li>
+          );
+        }
         return (
-          <li key={row.id}>
+          <li key={row.id} className={cx("group flex items-center", cur ? "bg-accent-soft" : "hover:bg-hover")}>
             <button
               type="button"
               disabled={!connected}
               onClick={() => void openStructure(row.id)}
               title={`Open #${row.id} (${row.n_atoms} atoms)${n ? ` with its stored ${Object.keys(row.latest_result_ids).join(", ")}` : ""}`}
-              className={cx("flex w-full items-baseline gap-1.5 py-1 pr-2 text-left", cur ? "bg-accent-soft" : "hover:bg-hover")}
+              className="flex min-w-0 flex-1 items-baseline gap-1.5 py-1 pr-2 text-left"
               style={{ paddingLeft: 8 + Math.min(depth, 5) * 12 }}
               data-structure-id={row.id}
             >
@@ -138,10 +193,25 @@ function StructureList() {
                 )}
               </span>
               <span className="shrink-0 text-2xs text-fg-3">{row.spacegroup_symbol}</span>
-              <span className="w-[62px] shrink-0 truncate text-right text-2xs text-fg-4" title={row.origin}>
+              <span className="w-[62px] shrink-0 truncate text-right text-2xs text-fg-4 group-focus-within:hidden group-hover:hidden" title={row.origin}>
                 {row.origin}
               </span>
             </button>
+            {/* Row actions take the origin column's place on hover / focus. */}
+            <div className="hidden w-[62px] shrink-0 justify-end gap-0.5 pr-1.5 group-focus-within:flex group-hover:flex">
+              <button type="button" className={rowBtn} title="Rename" aria-label={`Rename ${row.name}`} onClick={() => setEditing(row.id)}>
+                <Pencil size={11} />
+              </button>
+              <button
+                type="button"
+                className={cx(rowBtn, "hover:text-warn")}
+                title="Delete (with its results)"
+                aria-label={`Delete ${row.name}`}
+                onClick={() => confirmDelete(row, rows) && void deleteStructure(row.id)}
+              >
+                <Trash2 size={11} />
+              </button>
+            </div>
           </li>
         );
       })}
