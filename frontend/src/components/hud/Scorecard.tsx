@@ -13,6 +13,8 @@ import { evaluateHull } from "../../services/hullActions";
 import { commands } from "../../services/wsClient";
 import { badgeCriteria, useSettings } from "../../store/settings";
 import { useCrystalStore } from "../../store/useCrystalStore";
+import { useUi } from "../../store/uiStore";
+import { committeeVerdict } from "../../utils/analysisC";
 import { computeScorecard, scorecardSummary, type CheckId, type CheckState, type ScoreCheck } from "../../utils/scorecard";
 import { Panel, cx } from "./ui";
 
@@ -61,6 +63,9 @@ export interface ScorecardViewProps {
   onToggle(): void;
   onRun(id: CheckId): void;
   onConfirm(choice: "relax-then-run" | "run-anyway" | "cancel"): void;
+  /** Phase C1: committee result for this structure (optional "Model agreement" line). */
+  agreement?: { agree: boolean; text: string; stale: boolean } | null;
+  onAgreement?(): void;
 }
 
 export function ScorecardView(p: ScorecardViewProps) {
@@ -144,6 +149,23 @@ export function ScorecardView(p: ScorecardViewProps) {
               </div>
             );
           })}
+          {p.agreement && (
+            <button
+              type="button"
+              onClick={p.onAgreement}
+              className="flex w-full items-center gap-1.5 rounded-lg border border-white/[0.05] bg-white/[0.015] px-1.5 py-1 text-left"
+              data-check="agreement"
+              title="Committee of models (Compare models); click for the table"
+            >
+              <span className={cx("grid h-[18px] w-[18px] shrink-0 place-items-center rounded-full border", STATE_STYLE[p.agreement.stale ? "stale" : p.agreement.agree ? "pass" : "fail"].cls)}>
+                <StateIcon state={p.agreement.stale ? "stale" : p.agreement.agree ? "pass" : "fail"} />
+              </span>
+              <span className="min-w-0 flex-1 leading-tight">
+                <span className="text-[11px] font-medium text-slate-100">Model agreement</span>
+                <span className="block truncate font-mono text-[10px] text-slate-300">{p.agreement.text}</span>
+              </span>
+            </button>
+          )}
         </div>
       )}
     </Panel>
@@ -180,6 +202,16 @@ export function Scorecard() {
   const units = useSettings((s) => s.units);
   const collapsed = useSettings((s) => !!s.collapsed.scorecard);
   const [confirming, setConfirming] = useState<CheckId | null>(null);
+  const committee = useCrystalStore((s) => s.committee);
+  const verdict = committee ? committeeVerdict(committee.result) : null;
+  const agreement =
+    committee && verdict
+      ? {
+          agree: !verdict.disagree,
+          stale: committee.stateVersion !== stateVersion,
+          text: verdict.disagree ? `models disagree: ${verdict.reasons.join("; ")}` : `${committee.result.entries.length} models agree · ΔV ${verdict.volumeSpreadPct != null ? verdict.volumeSpreadPct.toFixed(1) : "—"} %`,
+        }
+      : null;
   const checks = computeScorecard({
     crystal,
     criteria: badgeCriteria(relax),
@@ -199,6 +231,8 @@ export function Scorecard() {
       canRun={connected && !!crystal}
       busy={busy}
       confirming={confirming}
+      agreement={agreement}
+      onAgreement={() => useUi.getState().openDialog("committee")}
       onToggle={() => useSettings.getState().setCollapsed("scorecard", !collapsed)}
       onRun={(id) => {
         const c = checks.find((x) => x.id === id)!;

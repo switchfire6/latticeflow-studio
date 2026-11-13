@@ -73,13 +73,12 @@ _CELL_CHOICES = ("as_is", "refined", "conventional", "primitive")
 _EV_PER_A3_TO_GPA = 160.21766208
 
 
-def atoms_from_cif(text: str) -> Atoms:
-    """Parse the first structure of a CIF with pymatgen's ``CifParser``.
+def structure_from_cif(text: str):
+    """First structure of a CIF as a pymatgen ``Structure`` (partial occupancies kept).
 
-    Disordered (partially occupied) structures are rejected; the studio needs an
-    ordered cell. Raises :class:`StructureIOError`.
+    Used by ``atoms_from_cif`` and by ``core.ordering`` (Phase C1). Raises
+    :class:`StructureIOError` (``INVALID_STRUCTURE``) for empty / unparsable input.
     """
-    from pymatgen.io.ase import AseAtomsAdaptor
     from pymatgen.io.cif import CifParser
 
     if not text or not text.strip():
@@ -93,7 +92,18 @@ def atoms_from_cif(text: str) -> Atoms:
         raise StructureIOError(f"could not parse CIF: {exc}") from None
     if not structures:
         raise StructureIOError("CIF contains no structure")
-    structure = structures[0]
+    return structures[0]
+
+
+def atoms_from_cif(text: str) -> Atoms:
+    """Parse the first structure of a CIF with pymatgen's ``CifParser``.
+
+    Disordered (partially occupied) structures are rejected; the studio needs an
+    ordered cell. Raises :class:`StructureIOError`.
+    """
+    from pymatgen.io.ase import AseAtomsAdaptor
+
+    structure = structure_from_cif(text)
     if not structure.is_ordered:
         raise StructureIOError(
             "CIF describes a disordered structure (partial occupancies); load an ordered approximant",

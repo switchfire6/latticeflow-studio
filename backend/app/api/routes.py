@@ -19,6 +19,8 @@ Error mapping (body is always ``ErrorResponse``, ``code`` an ``ErrorCode`` value
   ``/api/mp/*``: 503 ``MP_UNAVAILABLE`` (no key), 502 ``MP_UNAVAILABLE`` (upstream failure),
   404 ``MP_NOT_FOUND``, 422 ``INVALID_PAYLOAD`` (unparsable query / id); ``/api/diffraction``:
   422 ``INVALID_PAYLOAD`` for an empty 2theta range or unknown radiation.
+* Phase C1 ``/api/ordering``: 422 ``INVALID_STRUCTURE`` (unparsable CIF), 422 ``STRUCTURE_TOO_LARGE``
+  (smallest ordered cell > ``max_atoms``), 422 ``MODEL_UNAVAILABLE``.
 
 The handlers are HTTP-only: ``RequestValidationError`` never arises on the
 WebSocket route (that is ``WebSocketRequestValidationError``), ``ApiError`` is
@@ -50,7 +52,7 @@ from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse, Response
 
 from app.config import get_settings
-from app.core import diffraction, hull_analyzer, mp_client
+from app.core import diffraction, hull_analyzer, mp_client, ordering
 from app.core.structure_io import (
     StructureIOError,
     atoms_from_cif,
@@ -74,6 +76,8 @@ from app.schemas.api import (
     ModelListResponse,
     MPSearchResponse,
     MPStructureResponse,
+    OrderingRequest,
+    OrderingResponse,
 )
 from app.schemas.crystal import CrystalStatePayload
 from app.schemas.messages import ErrorCode
@@ -392,3 +396,15 @@ def mp_structure(material_id: str, ctx: MPContext = Depends(mp_context)) -> MPSt
     except Exception as exc:  # noqa: BLE001
         raise _compute_failed("CIF conversion", exc) from exc
     return MPStructureResponse(entry=entry, cif=cif)
+
+
+@router.post("/ordering", response_model=OrderingResponse, responses=_ERROR_RESPONSES)
+def order_structure(req: OrderingRequest) -> OrderingResponse:
+    """Ordered approximants of a (partially occupied) CIF ranked by uMLIP energy (``core.ordering``)."""
+    engine = _engine_for(req.model_id, req.dispersion)
+    try:
+        return ordering.order_disordered(req.cif, engine, max_atoms=req.max_atoms, n_candidates=req.n_candidates)
+    except StructureIOError as exc:
+        raise _structure_error(exc) from exc
+    except Exception as exc:  # noqa: BLE001
+        raise _compute_failed("ordering", exc) from exc

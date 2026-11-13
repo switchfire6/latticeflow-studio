@@ -15,6 +15,8 @@ import type {
   ModelListResponse,
   MPSearchResponse,
   MPStructureResponse,
+  OrderingRequest,
+  OrderingResponse,
   PresetInfo,
 } from "../types/protocol";
 
@@ -103,6 +105,10 @@ export function createApiClient(opts: ApiClientOptions = {}) {
     mpSearch: (q: string, signal?: AbortSignal) => getJson<MPSearchResponse>(`/mp/search?q=${encodeURIComponent(q.trim())}`, signal),
     mpStructure: (materialId: string, signal?: AbortSignal) =>
       getJson<MPStructureResponse>(`/mp/structure/${encodeURIComponent(materialId.trim())}`, signal),
+
+    // ---- Phase C1
+    /** Ordered approximants of a disordered CIF, ranked by energy (POST /api/ordering). */
+    ordering: (body: OrderingRequest, signal?: AbortSignal) => postJson<OrderingResponse>("/ordering", body, signal),
 
     /** POST /api/export/cif -> { blob, filename } (filename from Content-Disposition). */
     async exportStructure(crystal: CrystalStatePayload, format: ExportFormat | ExportOptions = "cif", signal?: AbortSignal) {

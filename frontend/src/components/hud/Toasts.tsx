@@ -2,6 +2,7 @@
 import { AlertOctagon, AlertTriangle, Info, X } from "lucide-react";
 import { useEffect } from "react";
 import { commands } from "../../services/wsClient";
+import { useUi } from "../../store/uiStore";
 import { useCrystalStore, type Toast, type ToastAction } from "../../store/useCrystalStore";
 import { cx } from "./ui";
 
@@ -12,6 +13,12 @@ function runAction(a: ToastAction): void {
   switch (a.kind) {
     case "continue-relaxation":
       commands.relax();
+      return;
+    case "find-orderings":
+      useUi.getState().openDialog("ordering");
+      return;
+    case "make-supercell":
+      useUi.getState().openDialog("supercell");
       return;
   }
 }

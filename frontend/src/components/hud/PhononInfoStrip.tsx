@@ -86,7 +86,7 @@ export function PhononInfoStrip() {
   if (!phonon) return null;
   const cell = phononCellText(phonon);
   return (
-    <div className="relative flex h-5 min-w-0 shrink-0 items-center gap-2 font-mono text-[10px] whitespace-nowrap text-slate-400" data-phonon-info>
+    <div className="relative flex h-6 min-w-0 shrink-0 items-center gap-2 overflow-x-clip font-mono text-[10px] whitespace-nowrap text-slate-400" data-phonon-info>
       <span className="min-w-0 truncate text-slate-300" title={[cell, phonon.band_path_source ? `k-path: ${phonon.band_path_source}` : ""].filter(Boolean).join(" · ")}>
         {cell || "phonons"}
       </span>
@@ -98,10 +98,11 @@ export function PhononInfoStrip() {
           className={cx("flex shrink-0 items-center gap-0.5 rounded px-1 hover:text-slate-200", colorBranches ? "text-cyan-200" : "text-slate-500")}
           aria-pressed={colorBranches}
         >
-          <Palette size={10} /> branches
+          <Palette size={10} />
+          <span className="max-[1499px]:hidden">branches</span>
         </button>
       )}
-      <span className="ml-auto flex min-w-0 items-center gap-1.5">
+      <span className="ml-auto flex min-w-0 shrink items-center gap-1.5">
         {checking ? (
           <span className="flex items-center gap-1 text-cyan-200">
             <Loader2 size={10} className="animate-spin" />
@@ -110,7 +111,9 @@ export function PhononInfoStrip() {
         ) : convergence ? (
           <ConvergenceReadout c={convergence} unit={unit} />
         ) : (
-          <span className="text-slate-500">convergence not checked</span>
+          <span className="min-w-0 truncate text-slate-500" title="Supercell convergence not checked">
+            not checked
+          </span>
         )}
         <Button
           className="shrink-0 px-1.5 py-0 text-[10px]"

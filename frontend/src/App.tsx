@@ -12,6 +12,8 @@ import { TransmuteToolbar } from "./components/hud/TransmuteToolbar";
 import { ViewportDropZone } from "./components/hud/ImportExport";
 import { refreshModels } from "./components/hud/ModelPicker";
 import { Scorecard } from "./components/hud/Scorecard";
+import { PhaseCDialogs } from "./components/hud/PhaseCDialogs";
+import { useLocalAnalysisAutoRefresh } from "./services/localActions";
 import { DisplayPanel, EigenmodePill, FollowBanner, StreamProgress, ToolModeBar } from "./components/hud/ViewportOverlays";
 import { api } from "./services/apiClient";
 import { commands, sessionMemory, studio } from "./services/wsClient";
@@ -91,6 +93,7 @@ function useBackend() {
 
 export function App() {
   useBackend();
+  useLocalAnalysisAutoRefresh();
   useShortcuts();
   const CrystalCanvas = useCrystalCanvas();
   const hasCrystal = useCrystalStore((s) => s.crystal !== null);
@@ -131,6 +134,7 @@ export function App() {
           </div>
           <TransmuteToolbar />
           <Toasts />
+          <PhaseCDialogs />
         </ViewportDropZone>
       </div>
       <BottomDock />

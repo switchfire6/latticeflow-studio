@@ -79,6 +79,20 @@ export function strainColor(strain: number, out: THREE.Color): THREE.Color {
   return out.copy(COLORS.slate).lerp(strain < 0 ? COLORS.compressed : COLORS.stretched, t);
 }
 
+/**
+ * Bond-valence deviation colormap (Phase C1): same diverging blue / slate /
+ * amber as the strain map but tuned to BV deviations (a few %); null = no
+ * ideal length known (neutral, dimmed).
+ */
+export const BV_DEADBAND = 0.015;
+export const BV_SATURATION = 0.08;
+const BV_UNKNOWN = new THREE.Color("#4B5563");
+export function bondValenceColor(dev: number | null, out: THREE.Color): THREE.Color {
+  if (dev === null || !Number.isFinite(dev)) return out.copy(BV_UNKNOWN);
+  const t = Math.min(1, Math.max(0, (Math.abs(dev) - BV_DEADBAND) / (BV_SATURATION - BV_DEADBAND)));
+  return out.copy(COLORS.slate).lerp(dev < 0 ? COLORS.compressed : COLORS.stretched, t);
+}
+
 /** Force colour: emerald (|F| <= 0.05) -> neon orange (|F| >= 0.5), log-interpolated, HDR-boosted for bloom. */
 export function forceColor(fnorm: number, out: THREE.Color): THREE.Color {
   const t = Math.min(1, Math.max(0, Math.log(Math.max(fnorm, 1e-9) / 0.05) / Math.log(10)));

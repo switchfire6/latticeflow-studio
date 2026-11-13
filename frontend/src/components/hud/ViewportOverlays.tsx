@@ -7,7 +7,7 @@ import { Eye, GitBranch, Hand, Loader2, Redo2, Replace, Square, Undo2, Waves, X 
 import { followStatusText, transitionText } from "../../utils/followText";
 import { commands } from "../../services/wsClient";
 import { useSettings } from "../../store/settings";
-import { selectActiveStream, useCrystalStore, type ToolMode } from "../../store/useCrystalStore";
+import { selectActiveStream, useCrystalStore, type BondColoring, type ToolMode } from "../../store/useCrystalStore";
 import { FREQUENCY_UNITS, formatFrequency, frequencyUnitLabel, type FrequencyUnit, type PressureUnit } from "../../utils/units";
 import { Button, Panel, Segmented, Toggle, cx } from "./ui";
 
@@ -80,6 +80,16 @@ export function DisplayPanel() {
       />
       <Toggle label="2×2×2 halo" checked={d.ghostHalo} onChange={(ghostHalo) => setDisplay({ ghostHalo })} />
       <Toggle label="Bonds" checked={d.bonds} onChange={(bonds) => setDisplay({ bonds })} />
+      <Segmented<BondColoring>
+        value={d.bondColoring}
+        title="Bond colour: covalent-radius strain, or bond-valence deviation (length − ideal)/ideal from the local analysis (blue short · amber long)"
+        options={[
+          { value: "strain", label: "strain", title: "(length − r_cov sum) / r_cov sum: ionic bonds read as compressed" },
+          { value: "valence", label: "BV", title: "Bond-valence deviation (length − ideal) / ideal: physically meaningful for ionic bonds" },
+        ]}
+        onChange={(bondColoring) => setDisplay({ bondColoring })}
+      />
+      <Toggle label="Polyhedra" title="Translucent coordination polyhedra (from the local analysis), coloured by the centre element" checked={d.polyhedra} onChange={(polyhedra) => setDisplay({ polyhedra })} />
       <Toggle label="Forces" checked={d.forceVectors} onChange={(forceVectors) => setDisplay({ forceVectors })} />
       <Toggle label="Trails" checked={d.trails} onChange={(trails) => setDisplay({ trails })} />
       <Toggle label="Cell" checked={d.unitCell} onChange={(unitCell) => setDisplay({ unitCell })} />
@@ -148,6 +158,19 @@ export function StreamProgress() {
   } else if (stream.kind === "model") {
     title = "Switching model";
     detail = p.message || "loading the checkpoint";
+  } else if (stream.kind === "md") {
+    title = "Molecular dynamics";
+    detail = p.step !== null ? `step ${p.step}${p.totalSteps ? `/${p.totalSteps}` : ""}` : "thermalising…";
+    if (p.step !== null && p.totalSteps) frac = Math.min(1, p.step / p.totalSteps);
+  } else if (stream.kind === "formation") {
+    title = "Defect formation energy";
+    detail = p.message || "evaluating bulk, defect and references";
+  } else if (stream.kind === "substitution") {
+    title = "Partial substitution";
+    detail = p.message || "ranking configurations";
+  } else if (stream.kind === "committee") {
+    title = "Model committee";
+    detail = p.message || "evaluating with each model";
   } else {
     title = "Phonon shake-test";
     detail = p.message || `${minLength != null ? `auto (≥ ${minLength} Å)` : supercell.join("×")} supercell · finite displacements`;

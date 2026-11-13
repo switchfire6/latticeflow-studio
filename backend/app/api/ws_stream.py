@@ -125,6 +125,40 @@ terminal group, ``STREAM_STOPPED`` or ``ERROR``)
   ``COMPUTE_FAILED`` if only the evaluation fails) and the session keeps its
   previous engine. A cancelled ``SET_MODEL`` is not joined: its load may finish
   in the background (into the shared registry) but is never applied.
+
+Phase C1 commands (IMPROVEMENT_SUGGESTIONS.md §5.7-5.10, §6.2)
+--------------------------------------------------------------
+* ``HISTORY_STATE.entries`` is always the full history (oldest first):
+  position, label, formula, n_atoms, energy_per_atom (of the stored payload,
+  i.e. the model that produced it), spacegroup_symbol.
+* ``REQUEST_LOCAL_ANALYSIS`` (instant, cancels nothing): ``LOCAL_ANALYSIS_DATA``
+  of a snapshot, its ``bond_ideal_lengths`` aligned with the active payload's bonds.
+* ``MAKE_SUPERCELL`` / ``ADD_ATOM`` (instant, state-changing like ``DELETE_ATOM``):
+  ``SINGLE_POINT_UPDATE`` + ``HISTORY_STATE`` (labels "Make supercell <label>"
+  with ``defects.supercell_label``, "Add <El> at (u, v, w)" with 3 decimals).
+  Over ``MAX_ATOMS``: ``STRUCTURE_TOO_LARGE``; det <= 0, an atom too close or
+  any other ``ValueError``: ``INVALID_OPERATION``; unknown / Z > 89 element:
+  ``INVALID_ELEMENT``.
+* ``COMPUTE_FORMATION_ENERGY`` (streaming, reads only, no history push):
+  ``bulk_position`` outside the history: ``INDEX_OUT_OF_RANGE``. ``PROGRESS``
+  from ``defects.formation_energy``; terminal ``FORMATION_ENERGY_RESULT``. No
+  ``MP_API_KEY`` (and nothing cached): ``ERROR INVALID_OPERATION`` explaining it.
+* ``SUBSTITUTE_FRACTION`` (streaming, state-changing): ``PROGRESS`` from
+  ``ordering.substitute_fraction``; terminal ``SUBSTITUTION_RESULT``, the
+  evaluated ``SINGLE_POINT_UPDATE`` of the chosen configuration, ``HISTORY_STATE``
+  ("Substitute <n> <A> -> <B>"). Element absent, A == B, zero atoms to replace
+  or a ``ValueError``: ``INVALID_OPERATION``; unknown / Z > 89: ``INVALID_ELEMENT``.
+* ``START_MD`` (streaming, state-changing, frame window like a relaxation):
+  ``MD_FRAME`` at step 0 and every ``frame_interval`` steps; the terminal group
+  is the last ``MD_FRAME`` (step ``n_steps``), ``MD_COMPLETE``, ``HISTORY_STATE``
+  ("MD <T> K <ensemble> (<t> ps)"). Every ``MD_FRAME`` replaces the active
+  structure (wrapped, no velocities), so a stop leaves the last sent frame
+  active (``STREAM_STOPPED`` + "MD <T> K <ensemble> (stopped)"). Divergence:
+  ``ERROR COMPUTE_FAILED``, the last sent frame stays active ("... (failed)").
+* ``COMMITTEE_EVALUATE`` (streaming, reads only, no history push): ``PROGRESS``
+  before each model (done = models finished, total = number of models) and at
+  the end; terminal ``COMMITTEE_RESULT``. Unknown / unloadable model:
+  ``ERROR MODEL_UNAVAILABLE``.
 """
 
 from __future__ import annotations
@@ -139,11 +173,14 @@ from typing import Any, Callable, Deque, Dict, Iterator, List, Optional, Sequenc
 
 import numpy as np
 from ase import Atoms
+from ase.constraints import FixCom
 from ase.data import atomic_masses, atomic_numbers
 from fastapi import APIRouter, WebSocket
 from pydantic import BaseModel, ValidationError
 from starlette.websockets import WebSocketDisconnect, WebSocketState
 
+from app.config import get_settings
+from app.core import md as md_core
 from app.core import phonon_engine, relaxer, structure_io
 from app.core.flow_generator import FlowCancelled, RiemannianFlowGenerator
 from app.core.phonon_engine import PhononAnalysis, PhononCancelled
@@ -186,6 +223,17 @@ from app.schemas.messages import (
     StopStreamPayload,
     StreamStopped,
     UndoPayload,
+    # Phase C1
+    AddAtomPayload,
+    CommitteeEvaluatePayload,
+    ComputeFormationEnergyPayload,
+    HistoryEntryInfo,
+    MakeSupercellPayload,
+    MDComplete,
+    MDFrame,
+    RequestLocalAnalysisPayload,
+    StartMDPayload,
+    SubstituteFractionPayload,
 )
 
 logger = logging.getLogger(__name__)
@@ -235,11 +283,19 @@ _PAYLOAD_MODELS: Dict[ClientCommand, type] = {
     _C.COMPUTE_ELASTIC_TENSOR: ComputeElasticTensorPayload,
     _C.EXPORT_PHONON_DATA: ExportPhononDataPayload,
     _C.SET_MODEL: SetModelPayload,
+    _C.REQUEST_LOCAL_ANALYSIS: RequestLocalAnalysisPayload,
+    _C.MAKE_SUPERCELL: MakeSupercellPayload,
+    _C.ADD_ATOM: AddAtomPayload,
+    _C.COMPUTE_FORMATION_ENERGY: ComputeFormationEnergyPayload,
+    _C.SUBSTITUTE_FRACTION: SubstituteFractionPayload,
+    _C.START_MD: StartMDPayload,
+    _C.COMMITTEE_EVALUATE: CommitteeEvaluatePayload,
 }
 _STREAMING = frozenset(
     {
         _C.START_FLOW_GENERATION, _C.START_RELAXATION, _C.RUN_PHONON_SHAKE_TEST, _C.FOLLOW_INSTABILITY,
         _C.CHECK_PHONON_CONVERGENCE, _C.COMPUTE_ELASTIC_TENSOR, _C.SET_MODEL,
+        _C.COMPUTE_FORMATION_ENERGY, _C.SUBSTITUTE_FRACTION, _C.START_MD, _C.COMMITTEE_EVALUATE,
     }
 )
 _INIT = "__INIT__"  # internal first FIFO item: load the default preset
@@ -676,6 +732,13 @@ class StudioSession:
             _C.COMPUTE_ELASTIC_TENSOR.value: self._cmd_elastic,
             _C.EXPORT_PHONON_DATA.value: self._cmd_export_phonon,
             _C.SET_MODEL.value: self._cmd_set_model,
+            _C.REQUEST_LOCAL_ANALYSIS.value: self._cmd_local_analysis,
+            _C.MAKE_SUPERCELL.value: self._cmd_make_supercell,
+            _C.ADD_ATOM.value: self._cmd_add_atom,
+            _C.COMPUTE_FORMATION_ENERGY.value: self._cmd_formation_energy,
+            _C.SUBSTITUTE_FRACTION.value: self._cmd_substitute,
+            _C.START_MD.value: self._cmd_md,
+            _C.COMMITTEE_EVALUATE.value: self._cmd_committee,
         }[command.type]
         await handler(command.payload)
 
@@ -862,6 +925,13 @@ class StudioSession:
             position=self._history_pos,
             length=len(self._history),
             label=entry.label,
+            entries=[
+                HistoryEntryInfo(
+                    position=i, label=e.label, formula=e.payload.formula, n_atoms=len(e.payload.atoms),
+                    energy_per_atom=e.payload.energy_per_atom, spacegroup_symbol=e.payload.spacegroup_symbol,
+                )
+                for i, e in enumerate(self._history)
+            ],
         )
         self._send(_message(ServerEvent.HISTORY_STATE, state))
 
@@ -1360,6 +1430,236 @@ class StudioSession:
             self._relaxation_worker(job, displaced, frames)
 
         self._launch(_C.FOLLOW_INSTABILITY.value, "Follow instability", worker)
+
+    # ================================================================ Phase C1
+    async def _cmd_local_analysis(self, p: RequestLocalAnalysisPayload) -> None:
+        from app.core import local_structure
+
+        atoms = _snapshot(self._require_atoms())
+        bonds = list(self.payload.bonds)  # aligned with the active payload (bond_ideal_lengths)
+        try:
+            data = await asyncio.to_thread(
+                lambda: local_structure.analyze(atoms, bonds, include_partial_rdf=p.include_partial_rdf)
+            )
+        except ValueError as exc:
+            raise CommandError(ErrorCode.INVALID_OPERATION, str(exc)) from None
+        self._send(_message(ServerEvent.LOCAL_ANALYSIS_DATA, data))
+
+    async def _cmd_make_supercell(self, p: MakeSupercellPayload) -> None:
+        from app.core import defects
+
+        atoms = self._require_atoms()
+        if any(len(row) != 3 for row in p.matrix):
+            raise CommandError(ErrorCode.INVALID_PAYLOAD, "matrix must be 3x3 integers")
+        matrix = [[int(x) for x in row] for row in p.matrix]
+        det = int(round(float(np.linalg.det(np.array(matrix, dtype=float)))))
+        if det <= 0:
+            raise CommandError(ErrorCode.INVALID_OPERATION, f"supercell matrix must have det > 0 (got {det})")
+        if len(atoms) * det > MAX_ATOMS:
+            raise CommandError(
+                ErrorCode.STRUCTURE_TOO_LARGE,
+                f"the supercell would have {len(atoms) * det} atoms; the studio limit is {MAX_ATOMS}",
+            )
+        await self._end_job()
+        work = _snapshot(self._require_atoms())
+        try:
+            supercell = await asyncio.to_thread(defects.make_supercell, work, matrix)
+        except ValueError as exc:
+            raise CommandError(ErrorCode.INVALID_OPERATION, str(exc)) from None
+        payload = await self._evaluate(supercell)
+        self._commit(supercell, payload, f"Make supercell {defects.supercell_label(matrix)}")
+
+    async def _cmd_add_atom(self, p: AddAtomPayload) -> None:
+        from app.core import defects
+
+        atoms = self._require_atoms()
+        symbol, _ = canonical_element(p.element)
+        frac = [float(x) for x in p.frac_coords]
+        if not all(np.isfinite(frac)):
+            raise CommandError(ErrorCode.INVALID_PAYLOAD, "frac_coords must be finite")
+        if len(atoms) + 1 > MAX_ATOMS:
+            raise CommandError(ErrorCode.STRUCTURE_TOO_LARGE, f"the studio limit is {MAX_ATOMS} atoms")
+        await self._end_job()
+        work = _snapshot(self._require_atoms())
+        try:
+            added = await asyncio.to_thread(defects.add_atom, work, symbol, frac)
+        except ValueError as exc:
+            raise CommandError(ErrorCode.INVALID_OPERATION, str(exc)) from None
+        payload = await self._evaluate(added)
+        self._commit(added, payload, f"Add {symbol} at ({frac[0]:.3f}, {frac[1]:.3f}, {frac[2]:.3f})")
+
+    async def _cmd_formation_energy(self, p: ComputeFormationEnergyPayload) -> None:
+        self._require_atoms()
+        if not p.bulk_position < len(self._history):
+            raise CommandError(
+                ErrorCode.INDEX_OUT_OF_RANGE,
+                f"bulk_position {p.bulk_position} out of range [0, {len(self._history)})",
+            )
+        bulk = _snapshot(self._history[p.bulk_position].atoms)
+        await self._end_job()
+        defect = _snapshot(self._require_atoms())
+        engine = self.engine
+        api_key = get_settings().mp_api_key
+
+        def worker(job: _Job) -> None:
+            from app.core import defects, hull_analyzer
+
+            def progress(done: int, total: int, message: str = "") -> None:
+                self._post_progress(job, done, total, message)
+
+            try:
+                result = defects.formation_energy(
+                    defect, bulk, engine, api_key=api_key, should_cancel=job.cancel.is_set, progress=progress,
+                )
+            except (defects.DefectCancelled, hull_analyzer.HullCancelled):
+                raise _JobCancelled() from None
+            except hull_analyzer.HullNoApiKeyError as exc:
+                job.check()
+                raise CommandError(
+                    ErrorCode.INVALID_OPERATION,
+                    f"chemical potentials need the Materials Project reference phases: {exc}. "
+                    "Set MP_API_KEY in the backend environment (or compute the hull of this chemical "
+                    "system once while a key is configured, so the references are cached).",
+                ) from None
+            except ValueError as exc:
+                job.check()
+                raise CommandError(ErrorCode.INVALID_OPERATION, str(exc)) from None
+            job.check()
+            self._emit_terminal(job, [_message(ServerEvent.FORMATION_ENERGY_RESULT, result)], None, None)
+
+        self._launch(_C.COMPUTE_FORMATION_ENERGY.value, "Formation energy", worker)
+
+    async def _cmd_substitute(self, p: SubstituteFractionPayload) -> None:
+        atoms = self._require_atoms()
+        from_symbol, _ = canonical_element(p.from_element)
+        to_symbol, _ = canonical_element(p.to_element)
+        if from_symbol == to_symbol:
+            raise CommandError(ErrorCode.INVALID_OPERATION, f"from_element and to_element are both {from_symbol}")
+        n_from = atoms.get_chemical_symbols().count(from_symbol)
+        if n_from == 0:
+            raise CommandError(ErrorCode.INVALID_OPERATION, f"the structure contains no {from_symbol}")
+        # (fraction rounding to zero atoms: ordering's ValueError -> INVALID_OPERATION)
+        await self._end_job()
+        work = _snapshot(self._require_atoms())
+        engine = self.engine
+
+        def worker(job: _Job) -> None:
+            from app.core import ordering
+
+            def progress(done: int, total: int, message: str = "") -> None:
+                self._post_progress(job, done, total, message)
+
+            try:
+                chosen, result = ordering.substitute_fraction(
+                    work, from_symbol, to_symbol, p.fraction, engine, n_candidates=p.n_candidates, seed=p.seed,
+                    should_cancel=job.cancel.is_set, progress=progress,
+                )
+            except ordering.OrderingCancelled:
+                raise _JobCancelled() from None
+            except ValueError as exc:
+                job.check()
+                raise CommandError(ErrorCode.INVALID_OPERATION, str(exc)) from None
+            job.check()
+            chosen = _snapshot(chosen)
+            payload = engine.evaluate(chosen)
+            job.check()
+            messages = [
+                _message(ServerEvent.SUBSTITUTION_RESULT, result),
+                _message(ServerEvent.SINGLE_POINT_UPDATE, SinglePointUpdate(crystal=payload)),
+            ]
+            self._emit_terminal(job, messages, chosen, payload,
+                                history_label=f"Substitute {result.n_substituted} {from_symbol} -> {to_symbol}")
+
+        self._launch(_C.SUBSTITUTE_FRACTION.value, "Substitution", worker)
+
+    async def _cmd_md(self, p: StartMDPayload) -> None:
+        atoms = self._require_atoms()
+        if p.ensemble == "NPT" and not (bool(np.all(atoms.pbc)) and atoms.cell.rank == 3):
+            raise CommandError(ErrorCode.INVALID_OPERATION, "NPT needs a fully periodic 3D cell")
+        await self._end_job()
+        work = _snapshot(self._require_atoms())
+        engine = self.engine
+        label = f"MD {p.temperature_k:g} K {p.ensemble}"
+        periodic = bool(np.all(work.pbc)) and work.cell.rank == 3
+
+        def frame_snapshot() -> Atoms:
+            """The integrator's atoms *are* the frame just yielded: wrapped copy, no velocities."""
+            snap = _snapshot(work)
+            if "momenta" in snap.arrays:
+                del snap.arrays["momenta"]
+            snap.set_constraint([c for c in snap.constraints if not isinstance(c, FixCom)])  # NVT's own
+            if periodic:
+                _wrap_in_place(snap)
+            return snap
+
+        def worker(job: _Job) -> None:
+            try:
+                frames = md_core.iter_md(
+                    work, engine, temperature_k=p.temperature_k, ensemble=p.ensemble, timestep_fs=p.timestep_fs,
+                    n_steps=p.n_steps, friction_per_fs=p.friction_per_fs, pressure_gpa=p.pressure_gpa,
+                    frame_interval=p.frame_interval, seed=p.seed, should_cancel=job.cancel.is_set,
+                )
+            except ValueError as exc:
+                raise CommandError(ErrorCode.INVALID_OPERATION, str(exc)) from None
+            summary: Optional[MDComplete] = None
+            final: Optional[Tuple[MDFrame, Atoms]] = None
+            try:
+                while True:
+                    job.check()
+                    try:
+                        frame = next(frames)
+                    except StopIteration as stop:
+                        summary = stop.value
+                        break
+                    except md_core.MDDivergedError as exc:
+                        raise CommandError(
+                            ErrorCode.COMPUTE_FAILED, f"{exc}; the last frame sent is kept as the structure",
+                        ) from None
+                    snap = frame_snapshot()
+                    if frame.step >= p.n_steps:
+                        final = (frame, snap)  # sent with MD_COMPLETE as the terminal group
+                    else:
+                        self._emit_frame(job, ServerEvent.MD_FRAME, frame, snap, frame.crystal)
+            finally:
+                frames.close()
+            if summary is None or final is None:
+                job.check()  # the generator stops silently when cancelled
+                raise RuntimeError("MD ended without a summary")
+            frame, snap = final
+            messages = [_message(ServerEvent.MD_FRAME, frame), _message(ServerEvent.MD_COMPLETE, summary)]
+            self._emit_terminal(job, messages, snap, frame.crystal,
+                                history_label=f"{label} ({summary.time_ps:.3g} ps)")
+
+        self._launch(_C.START_MD.value, label, worker)
+
+    async def _cmd_committee(self, p: CommitteeEvaluatePayload) -> None:
+        self._require_atoms()
+        await self._end_job()
+        work = _snapshot(self._require_atoms())
+
+        def worker(job: _Job) -> None:
+            from app.core import committee
+
+            def progress(done: int, total: int, message: str = "") -> None:
+                self._post_progress(job, done, total, message)
+
+            try:
+                result = committee.evaluate(
+                    work, p.model_ids, relax=p.relax, dispersion=p.dispersion,
+                    should_cancel=job.cancel.is_set, progress=progress,
+                )
+            except committee.CommitteeCancelled:
+                raise _JobCancelled() from None
+            except ModelUnavailableError as exc:
+                job.check()
+                raise CommandError(ErrorCode.MODEL_UNAVAILABLE, str(exc)) from None
+            except ValueError as exc:
+                job.check()
+                raise CommandError(ErrorCode.INVALID_OPERATION, str(exc)) from None
+            job.check()
+            self._emit_terminal(job, [_message(ServerEvent.COMMITTEE_RESULT, result)], None, None)
+
+        self._launch(_C.COMMITTEE_EVALUATE.value, "Committee", worker)
 
 
 # --------------------------------------------------------------------------- #

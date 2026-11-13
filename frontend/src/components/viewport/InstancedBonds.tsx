@@ -11,6 +11,11 @@
  * Colour: brushed metallic slate at equilibrium, a diverging blue (compressed)
  * → amber (stretched) map by strain_ratio, and bonds flagged is_unstable pulse
  * emissive crimson #FF2A54 (HDR, so they bloom).
+ *
+ * Phase C1: with display.bondColoring = "valence" the same diverging map
+ * shows the bond-valence deviation (length − ideal) / ideal from
+ * LOCAL_ANALYSIS_DATA.bond_ideal_lengths (ionic bonds no longer read as
+ * "compressed"); bonds without an ideal length are drawn neutral grey.
  */
 import { useFrame } from "@react-three/fiber";
 import { useEffect, useMemo, useRef, useState } from "react";
@@ -18,7 +23,9 @@ import * as THREE from "three";
 import { useCrystalStore } from "../../store/useCrystalStore";
 import type { Vec3 } from "../../utils/latticeMath";
 import { getDisplaySet } from "./displaySet";
-import { COLORS, HALO_OPACITY, growCapacity, strainColor, writeSegment } from "./sceneUtils";
+import { alignIdeals } from "../../utils/localStructure";
+import type { BondEdge } from "../../types/protocol";
+import { COLORS, HALO_OPACITY, bondValenceColor, growCapacity, strainColor, writeSegment } from "./sceneUtils";
 
 export const BOND_RADIUS = 0.1;
 
@@ -26,10 +33,18 @@ const _a: Vec3 = [0, 0, 0];
 const _b: Vec3 = [0, 0, 0];
 const _c = new THREE.Color();
 
+/** Ideal lengths aligned with the current bonds, cached by (bonds array, analysis) identity. */
+let idealCache: { bonds: BondEdge[]; map: Map<string, number>; out: Float32Array } | null = null;
+function idealsFor(bonds: BondEdge[], map: Map<string, number>): Float32Array {
+  if (!idealCache || idealCache.bonds !== bonds || idealCache.map !== map) idealCache = { bonds, map, out: alignIdeals(bonds, map) };
+  return idealCache.out;
+}
+
 export function InstancedBonds() {
   const visible = useCrystalStore((s) => s.display.bonds);
   const ghostHalo = useCrystalStore((s) => s.display.ghostHalo);
   const spaceFilling = useCrystalStore((s) => s.display.representation === "space-filling");
+  const valence = useCrystalStore((s) => s.display.bondColoring === "valence");
 
   const [capacity, setCapacity] = useState(128);
   const bondsRef = useRef<THREE.InstancedMesh>(null);
@@ -82,6 +97,10 @@ export function InstancedBonds() {
     if (!show) return;
 
     const bonds = f.bonds;
+    const la = valence ? useCrystalStore.getState().localAnalysis : null;
+    const ideals = la ? idealsFor(bonds, la.ideals) : null;
+    const colorOf = (bi: number, b: BondEdge) =>
+      ideals ? bondValenceColor(Number.isFinite(ideals[bi]!) ? (b.length - ideals[bi]!) / ideals[bi]! : null, _c) : strainColor(b.strain_ratio, _c);
     let k = 0; // normal
     let u = 0; // unstable
     let h = 0; // ghost
@@ -101,13 +120,13 @@ export function InstancedBonds() {
       }
       if (sgm.ghost) {
         writeSegment(halo, h, _a[0], _a[1], _a[2], dx, dy, dz, BOND_RADIUS, true);
-        halo.setColorAt(h, bond.is_unstable ? COLORS.crimson : strainColor(bond.strain_ratio, _c));
+        halo.setColorAt(h, bond.is_unstable ? COLORS.crimson : colorOf(sgm.bond, bond));
         h++;
       } else if (bond.is_unstable) {
         writeSegment(unstable, u++, _a[0], _a[1], _a[2], dx, dy, dz, BOND_RADIUS * 1.15, true);
       } else {
         writeSegment(mesh, k, _a[0], _a[1], _a[2], dx, dy, dz, BOND_RADIUS, true);
-        mesh.setColorAt(k, strainColor(bond.strain_ratio, _c));
+        mesh.setColorAt(k, colorOf(sgm.bond, bond));
         k++;
       }
     }

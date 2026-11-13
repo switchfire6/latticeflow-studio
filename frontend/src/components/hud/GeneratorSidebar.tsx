@@ -19,6 +19,8 @@ import { MaterialsProjectButton } from "./MaterialsProjectDialog";
 import { PeriodicTablePicker } from "./PeriodicTablePicker";
 import { StructureActions } from "./StructureActions";
 import { StructurePanel } from "./StructurePanel";
+import { HistoryPanel } from "./HistoryPanel";
+import { DefectsCard } from "./PhaseCDialogs";
 import { Button, CollapsibleCard, FormulaText, Slider, Toggle, cx, inputCls } from "./ui";
 
 const FAMILIES: CrystalSystem[] = ["triclinic", "monoclinic", "orthorhombic", "tetragonal", "trigonal", "hexagonal", "cubic"];
@@ -169,6 +171,8 @@ export function GeneratorSidebar() {
       <div className="flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto p-3">
         <LoadCard />
         <StructurePanel />
+        <HistoryPanel />
+        <DefectsCard />
         <GeneratorCard />
         <SymmetryExportCard />
       </div>

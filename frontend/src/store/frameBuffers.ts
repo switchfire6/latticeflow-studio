@@ -13,7 +13,7 @@ import { atomicMass } from "../utils/cpkColors";
 import { flattenMatrix, invert3, minimumImageCart, type Vec3 } from "../utils/latticeMath";
 import { imageDisplacement } from "../utils/phonon";
 
-export type CrystalSource = "single_point" | "phonon_flags" | "flow" | "flow_final" | "relaxation";
+export type CrystalSource = "single_point" | "phonon_flags" | "flow" | "flow_final" | "relaxation" | "md";
 
 export interface DragOverride {
   index: number;

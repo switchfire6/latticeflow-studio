@@ -8,6 +8,8 @@ import { Activity, Grid3x3, Trash2, X } from "lucide-react";
 import { useState } from "react";
 import { commands } from "../../services/wsClient";
 import { useCrystalStore } from "../../store/useCrystalStore";
+import { useUi } from "../../store/uiStore";
+import { DEFECT_MIN_DISTANCE, shortestPeriodicDistance } from "../../utils/supercell";
 import { cpkHex, elementBySymbol, elementByZ } from "../../utils/cpkColors";
 import { groupNeighbours } from "../../utils/periodicTable";
 import { PeriodicTablePicker } from "./PeriodicTablePicker";
@@ -41,7 +43,19 @@ export function TransmuteToolbar() {
   const connected = useCrystalStore((s) => s.connection === "open");
   const [allEquivalent, setAllEquivalent] = useState(false);
   const [tableOpen, setTableOpen] = useState(false);
+  const [vacancyWarn, setVacancyWarn] = useState(false);
+  const matrix = useCrystalStore((s) => s.crystal?.lattice.matrix ?? null);
+  const sameElement = useCrystalStore((s) => (atom ? (s.crystal?.atoms.filter((a) => a.element === atom.element).length ?? 0) : 0));
   if (selected === null || !atom) return null;
+  const dmin = matrix ? shortestPeriodicDistance(matrix) : Infinity;
+  const createVacancy = () => {
+    if (dmin < DEFECT_MIN_DISTANCE && !vacancyWarn) {
+      setVacancyWarn(true);
+      return;
+    }
+    setVacancyWarn(false);
+    commands.deleteAtom(selected);
+  };
 
   const el = elementByZ(atom.atomic_number);
   const { column, row } = groupNeighbours(el.symbol);
@@ -107,9 +121,34 @@ export function TransmuteToolbar() {
       </label>
 
       <div className="mt-3 grid grid-cols-1 gap-2 border-t border-white/[0.06] pt-3">
-        <Button variant="ghost" disabled={!connected} onClick={() => commands.deleteAtom(selected)}>
+        <Button variant="ghost" disabled={!connected} onClick={createVacancy}>
           <Trash2 size={13} /> Create Vacancy Defect
         </Button>
+        {vacancyWarn && (
+          <div className="rounded-md border border-amber-400/35 bg-amber-400/[0.07] p-2 text-[10.5px] leading-snug text-amber-100" data-vacancy-warning>
+            <div className="mb-1.5">
+              Shortest periodic distance {dmin.toFixed(1)} Å (&lt; {DEFECT_MIN_DISTANCE} Å): the vacancy interacts with its images — this is {(100 / Math.max(1, sameElement)).toFixed(0)} % of the {el.symbol} sites, not a point defect.
+            </div>
+            <div className="flex gap-1">
+              <button
+                type="button"
+                className="rounded border border-cyan-400/50 bg-cyan-400/15 px-1.5 py-0.5 text-cyan-100 hover:bg-cyan-400/25"
+                onClick={() => {
+                  setVacancyWarn(false);
+                  useUi.getState().openDialog("supercell");
+                }}
+              >
+                Make supercell first
+              </button>
+              <button type="button" className="rounded border border-white/10 px-1.5 py-0.5 text-slate-300 hover:bg-white/5" onClick={createVacancy}>
+                Create anyway
+              </button>
+              <button type="button" className="ml-auto px-1 text-slate-500 hover:text-slate-200" onClick={() => setVacancyWarn(false)} aria-label="cancel">
+                <X size={11} />
+              </button>
+            </div>
+          </div>
+        )}
         <StructureActions />
       </div>
       <div className="mt-2 flex items-center gap-1 text-[10px] text-slate-500">

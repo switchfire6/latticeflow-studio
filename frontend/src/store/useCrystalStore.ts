@@ -17,6 +17,12 @@ import { create } from "zustand";
 import type {
   BulkModulusResult,
   ClientCommand,
+  CommitteeResult,
+  FormationEnergyResult,
+  LocalAnalysisData,
+  MDComplete,
+  MDFrame,
+  SubstitutionResult,
   DiffractionResponse,
   ElasticTensorResult,
   CrystalStatePayload,
@@ -34,7 +40,9 @@ import type {
   Progress,
 } from "../types/protocol";
 import type { ExperimentalPattern } from "../utils/diffraction";
+import { idealLengthMap } from "../utils/localStructure";
 import { loadJSON, saveJSON } from "../utils/persist";
+
 import { atomsPerFormulaUnit, type LatticeReference } from "../utils/structureInfo";
 import { DEFAULT_PHONON_PARAMS, type PhononAnimParams } from "../utils/phonon";
 import { throttle, type Clock, realClock } from "../utils/throttle";
@@ -56,14 +64,23 @@ export type StreamCommand = Extract<
   | "CHECK_PHONON_CONVERGENCE"
   | "COMPUTE_ELASTIC_TENSOR"
   | "SET_MODEL"
+  // Phase C1
+  | "COMPUTE_FORMATION_ENERGY"
+  | "SUBSTITUTE_FRACTION"
+  | "START_MD"
+  | "COMMITTEE_EVALUATE"
 >;
-export type StreamKind = "flow" | "relaxation" | "phonon" | "elastic" | "model";
+export type StreamKind = "flow" | "relaxation" | "phonon" | "elastic" | "model" | "formation" | "substitution" | "md" | "committee";
 
 export function streamKind(command: StreamCommand): StreamKind {
   if (command === "START_FLOW_GENERATION") return "flow";
   if (command === "RUN_PHONON_SHAKE_TEST" || command === "CHECK_PHONON_CONVERGENCE") return "phonon";
   if (command === "COMPUTE_ELASTIC_TENSOR") return "elastic";
   if (command === "SET_MODEL") return "model";
+  if (command === "COMPUTE_FORMATION_ENERGY") return "formation";
+  if (command === "SUBSTITUTE_FRACTION") return "substitution";
+  if (command === "START_MD") return "md";
+  if (command === "COMMITTEE_EVALUATE") return "committee";
   return "relaxation"; // START_RELAXATION, FOLLOW_INSTABILITY, PERTURB(auto_relax)
 }
 
@@ -97,7 +114,7 @@ export interface RelaxPoint {
 
 export type ToastLevel = "error" | "warning" | "info";
 /** Serializable toast action; the Toasts component maps the kind to a handler. */
-export type ToastAction = { kind: "continue-relaxation"; label: string };
+export type ToastAction = { kind: "continue-relaxation" | "find-orderings" | "make-supercell"; label: string };
 export interface Toast {
   id: number;
   level: ToastLevel;
@@ -116,7 +133,12 @@ export interface DisplayOptions {
   trails: boolean;
   unitCell: boolean;
   postprocessing: boolean;
+  /** Phase C1: translucent coordination polyhedra (needs a local analysis). */
+  polyhedra: boolean;
+  /** Phase C1: bond colour by covalent-radius strain or by bond-valence deviation. */
+  bondColoring: BondColoring;
 }
+export type BondColoring = "strain" | "valence";
 
 export const DEFAULT_DISPLAY: DisplayOptions = {
   representation: "ball-and-stick",
@@ -126,6 +148,8 @@ export const DEFAULT_DISPLAY: DisplayOptions = {
   trails: true,
   unitCell: true,
   postprocessing: true,
+  polyhedra: false,
+  bondColoring: "strain",
 };
 
 /** Compact description of a structure, for before/after comparisons. */
@@ -173,10 +197,10 @@ export type HullState =
   | { status: "unavailable"; message: string; stateVersion: number }
   | { status: "error"; code: string; message: string; stateVersion: number };
 
-export type DockPane = "dispersion" | "dos" | "rdf" | "relaxation" | "eos" | "elastic" | "xrd";
-export const DOCK_PANES: readonly DockPane[] = ["dispersion", "dos", "rdf", "relaxation", "eos", "elastic", "xrd"];
+export type DockPane = "dispersion" | "dos" | "rdf" | "relaxation" | "eos" | "elastic" | "xrd" | "local" | "md";
+export const DOCK_PANES: readonly DockPane[] = ["dispersion", "dos", "rdf", "relaxation", "eos", "elastic", "xrd", "local", "md"];
 /** Panes that appear only once requested (button / dock toggle) or when they hold a result. */
-export const ON_DEMAND_PANES: readonly DockPane[] = ["elastic", "xrd"];
+export const ON_DEMAND_PANES: readonly DockPane[] = ["elastic", "xrd", "local", "md"];
 export interface DockState {
   open: boolean;
   height: number;
@@ -188,7 +212,7 @@ export const DEFAULT_DOCK: DockState = {
   height: 300,
   // The DOS pane is offered (toggle + "DOS & thermo" button) but not forced into the layout.
   hidden: ["dos"],
-  weights: { dispersion: 1.7, dos: 1.5, rdf: 1, relaxation: 1.2, eos: 1.4, elastic: 1.5, xrd: 1.7 },
+  weights: { dispersion: 1.7, dos: 1.5, rdf: 1, relaxation: 1.2, eos: 1.4, elastic: 1.5, xrd: 1.7, local: 1.8, md: 1.9 },
 };
 
 /** Merge a stored dock layout over the defaults (older layouts lack the Phase A panes). */
@@ -260,6 +284,53 @@ export interface DiffractionState {
   stateVersion: number;
 }
 
+/** Phase C1: LOCAL_ANALYSIS_DATA with the bonds it was aligned to. */
+export interface LocalAnalysisState {
+  data: LocalAnalysisData;
+  stateVersion: number;
+  nAtoms: number;
+  /** bond key -> bond-valence ideal length (survives bond reordering / drags). */
+  ideals: Map<string, number>;
+}
+export interface FormationState {
+  result: FormationEnergyResult;
+  stateVersion: number;
+}
+export interface CommitteeState {
+  result: CommitteeResult;
+  stateVersion: number;
+}
+/** Live MD series (mutable, in the session bookkeeping; `mdVersion` bumps on change). */
+export interface MdSeries {
+  streamId: number | null;
+  nAtoms: number;
+  nSteps: number | null;
+  temperatureTarget: number | null;
+  times: number[];
+  temperature: number[];
+  epotPerAtom: number[];
+  pressure: number[];
+  volume: number[];
+  msd: Record<string, number[]>;
+  complete: MDComplete | null;
+  status: "idle" | "running" | "complete" | "stopped" | "failed";
+}
+export const emptyMdSeries = (): MdSeries => ({
+  streamId: null,
+  nAtoms: 0,
+  nSteps: null,
+  temperatureTarget: null,
+  times: [],
+  temperature: [],
+  epotPerAtom: [],
+  pressure: [],
+  volume: [],
+  msd: {},
+  complete: null,
+  status: "idle",
+});
+export const MD_SERIES_LIMIT = 5000;
+
 /** A relaxation that stopped at max_steps without converging ("Continue relaxation"). */
 export interface UnconvergedRelaxation {
   steps: number;
@@ -297,6 +368,9 @@ export interface SessionBookkeeping {
   /** PHONON_CONVERGENCE_RESULT seen; the next PHONON_ANALYSIS_COMPLETE belongs to it. */
   convergenceArrived: boolean;
   nextToastId: number;
+  /** Phase C1: text of the latest LOAD_STRUCTURE {cif | text} (offered for ordering when it is disordered). */
+  lastLoadText: string | null;
+  md: MdSeries;
 }
 
 export interface CrystalStoreState {
@@ -361,6 +435,17 @@ export interface CrystalStoreState {
   phononExportPending: boolean;
   /** On-demand panes the user opened this session. */
   openedPanes: DockPane[];
+
+  // Phase C1
+  localAnalysis: LocalAnalysisState | null;
+  localPending: boolean;
+  formation: FormationState | null;
+  substitution: SubstitutionResult | null;
+  committee: CommitteeState | null;
+  /** Bumped (throttled) on every MD frame / completion. */
+  mdVersion: number;
+  /** A LOAD_STRUCTURE refused as DISORDERED_STRUCTURE: its CIF, for "Find ordered approximants". */
+  disordered: { cif: string; message: string } | null;
 
   // misc
   relaxHistory: RelaxPoint[];
@@ -445,6 +530,18 @@ export interface CrystalStoreState {
    */
   bumpStateVersion(): void;
 
+  // Phase C1
+  setLocalAnalysis(d: LocalAnalysisData | null): void;
+  setLocalPending(p: boolean): void;
+  setFormation(f: FormationState | null): void;
+  setSubstitution(r: SubstitutionResult | null): void;
+  setCommittee(c: CommitteeState | null): void;
+  setDisordered(d: { cif: string; message: string } | null): void;
+  /** Start a new MD series (START_MD sent). */
+  resetMd(nSteps: number | null, temperature: number | null): void;
+  pushMdFrame(streamId: number, f: MDFrame): void;
+  finishMd(status: MdSeries["status"], complete?: MDComplete | null): void;
+
   setToolMode(mode: ToolMode): void;
   selectAtom(index: number | null): void;
   setHoveredAtom(index: number | null): void;
@@ -484,6 +581,8 @@ export function createCrystalStore(opts: CrystalStoreOptions = {}) {
       phononMinLength: null,
       convergenceArrived: false,
       nextToastId: 1,
+      lastLoadText: null,
+      md: emptyMdSeries(),
     };
     const dockKey = opts.dockStorageKey ?? null;
     const initialDock: DockState = normalizeDock(dockKey ? loadJSON<Partial<DockState>>(dockKey, DEFAULT_DOCK) : DEFAULT_DOCK);
@@ -500,8 +599,10 @@ export function createCrystalStore(opts: CrystalStoreOptions = {}) {
         stateVersion: frame.stateVersion,
         streams: snapshotStreams(),
         relaxHistory: session.relaxHistory.slice(),
+        mdVersion,
       });
     };
+    let mdVersion = 0;
     const hud = throttle(publish, opts.hudThrottleMs ?? HUD_THROTTLE_MS, clock);
     const publishNow = () => {
       hud.cancel();
@@ -558,6 +659,13 @@ export function createCrystalStore(opts: CrystalStoreOptions = {}) {
       xrdExperimental: null,
       phononExportPending: false,
       openedPanes: [],
+      localAnalysis: null,
+      localPending: false,
+      formation: null,
+      substitution: null,
+      committee: null,
+      mdVersion: 0,
+      disordered: null,
       relaxHistory: [],
       toasts: [],
       lastError: null,
@@ -595,7 +703,9 @@ export function createCrystalStore(opts: CrystalStoreOptions = {}) {
           progress: {},
           convergence: null,
           phononExportPending: false,
+          localPending: false,
         }));
+        if (session.md.status === "running") session.md.status = "stopped";
         publishNow();
       },
 
@@ -773,6 +883,56 @@ export function createCrystalStore(opts: CrystalStoreOptions = {}) {
       },
       bumpStateVersion: () => {
         frame.stateVersion++;
+        publishNow();
+      },
+
+      setLocalAnalysis: (data) =>
+        set({
+          localPending: false,
+          localAnalysis: data
+            ? { data, stateVersion: frame.stateVersion, nAtoms: frame.n, ideals: idealLengthMap(frame.bonds, data.bond_ideal_lengths) }
+            : null,
+        }),
+      setLocalPending: (localPending) => set({ localPending }),
+      setFormation: (formation) => set({ formation }),
+      setSubstitution: (substitution) => set({ substitution }),
+      setCommittee: (committee) => set({ committee }),
+      setDisordered: (disordered) => set({ disordered }),
+      resetMd: (nSteps, temperature) => {
+        session.md = { ...emptyMdSeries(), nSteps, temperatureTarget: temperature, status: "running" };
+        mdVersion++;
+        publishNow();
+      },
+      pushMdFrame: (streamId, p) => {
+        let md = session.md;
+        if (md.streamId !== streamId) {
+          if (md.streamId !== null) md = session.md = { ...emptyMdSeries(), nSteps: md.nSteps, temperatureTarget: md.temperatureTarget };
+          md.streamId = streamId;
+          md.status = "running";
+        }
+        const n = Math.max(1, p.crystal.atoms.length);
+        md.nAtoms = n;
+        md.times.push(p.time_ps);
+        md.temperature.push(p.temperature_k);
+        md.epotPerAtom.push(p.potential_energy_ev / n);
+        md.pressure.push(p.pressure_gpa ?? Number.NaN);
+        md.volume.push(p.volume);
+        for (const [el, v] of Object.entries(p.msd_by_element)) (md.msd[el] ??= []).push(v);
+        if (md.times.length > MD_SERIES_LIMIT) {
+          md.times.shift();
+          md.temperature.shift();
+          md.epotPerAtom.shift();
+          md.pressure.shift();
+          md.volume.shift();
+          for (const a of Object.values(md.msd)) a.shift();
+        }
+        mdVersion++;
+        hud();
+      },
+      finishMd: (status, complete = null) => {
+        session.md.status = status;
+        if (complete) session.md.complete = complete;
+        mdVersion++;
         publishNow();
       },
 

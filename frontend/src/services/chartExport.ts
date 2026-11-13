@@ -15,6 +15,7 @@ import {
   rdfCsv,
   relaxationCsv,
   thermalCsv,
+  toCsv,
 } from "../utils/csv";
 import { downloadBlob, downloadText } from "../utils/download";
 import { activeModel, modelBadgeText } from "../utils/models";
@@ -67,6 +68,49 @@ export function paneCsvFiles(pane: DockPane, st: CrystalStoreState, unit: Freque
       return st.diffraction ? [{ label: "CSV · peaks", filename: `${fileStem(f, "xrd_peaks")}.csv`, build: () => diffractionCsv(st.diffraction!.result, head) }] : [];
     case "elastic":
       return st.elastic ? [{ label: "CSV · C_ij", filename: `${fileStem(f, "elastic")}.csv`, build: () => elasticCsv(st.elastic!.result, head) }] : [];
+    case "local": {
+      const la = st.localAnalysis?.data;
+      if (!la) return [];
+      const out: CsvFile[] = [
+        {
+          label: "CSV · sites (CN, BVS)",
+          filename: `${fileStem(f, "local_sites")}.csv`,
+          build: () =>
+            toCsv(
+              ["index", "element", "cn", "oxidation_state", "bvs"],
+              la.sites.map((s) => [s.index, s.element, s.coordination_number, s.oxidation_state, s.bond_valence_sum]),
+              [...head, `GII ${la.global_instability_index ?? ""} v.u.`, la.method],
+            ),
+        },
+      ];
+      const pr = la.partial_rdf;
+      if (pr && Object.keys(pr).length) {
+        const keys = Object.keys(pr).sort();
+        out.push({
+          label: "CSV · partial g(r)",
+          filename: `${fileStem(f, "partial_rdf")}.csv`,
+          build: () => toCsv(["r_A", ...keys.map((k) => `g_${k}`)], la.rdf_r.map((r, i) => [r, ...keys.map((k) => pr[k]![i])]), head),
+        });
+      }
+      return out;
+    }
+    case "md": {
+      const md = st.session.md;
+      if (!md.times.length) return [];
+      const els = Object.keys(md.msd).sort();
+      return [
+        {
+          label: "CSV · MD trajectory",
+          filename: `${fileStem(f, "md")}.csv`,
+          build: () =>
+            toCsv(
+              ["time_ps", "temperature_K", "epot_eV_per_atom", "pressure_GPa", "volume_A3", ...els.map((e) => `msd_${e}_A2`)],
+              md.times.map((t, i) => [t, md.temperature[i], md.epotPerAtom[i], md.pressure[i], md.volume[i], ...els.map((e) => md.msd[e]![i])]),
+              head,
+            ),
+        },
+      ];
+    }
   }
 }
 

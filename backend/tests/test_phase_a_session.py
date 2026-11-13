@@ -63,6 +63,8 @@ class HStudio(Studio):
     def history(self) -> Dict[str, Any]:
         state = self.expect("HISTORY_STATE")
         HistoryState.model_validate(state)
+        # Phase C1: the full entry list is checked in test_phase_c_session.py; keep it aside.
+        self.last_entries = state.pop("entries", None)
         return state
 
     def commit(self) -> Dict[str, Any]:

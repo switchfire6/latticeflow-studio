@@ -68,7 +68,7 @@ export function ExportMenu({ items, title = "Export" }: { items: ExportItem[]; t
 export function usePaneExportItems(pane: DockPane, bodyRef: RefObject<HTMLElement | null>, extra: ExportItem[] = []): ExportItem[] {
   // Re-render when the pane's data changes so the menu enables / disables correctly.
   useCrystalStore((s) =>
-    pane === "dispersion" ? s.phonon : pane === "dos" ? s.dos : pane === "eos" ? s.eos : pane === "xrd" ? s.diffraction : pane === "elastic" ? s.elastic : pane === "relaxation" ? s.relaxHistory : s.structureVersion,
+    pane === "dispersion" ? s.phonon : pane === "dos" ? s.dos : pane === "eos" ? s.eos : pane === "xrd" ? s.diffraction : pane === "elastic" ? s.elastic : pane === "relaxation" ? s.relaxHistory : pane === "local" ? s.localAnalysis : pane === "md" ? s.mdVersion : s.structureVersion,
   );
   const st = useCrystalStore.getState();
   const files = paneCsvFiles(pane, st, currentFrequencyUnit());

@@ -96,7 +96,7 @@ export function LineChart(p: LineChartProps) {
       ctx.font = CHART_FONT;
       ctx.textAlign = "right";
       ctx.textBaseline = "middle";
-      for (const t of niceTicks(y0d, y1d, 4)) {
+      for (const t of niceTicks(y0d, y1d, Math.max(2, Math.min(4, Math.floor((yB - yT) / 26))))) {
         const py = Math.round(y(t)) + 0.5;
         ctx.strokeStyle = CHART_COLORS.grid;
         ctx.beginPath();

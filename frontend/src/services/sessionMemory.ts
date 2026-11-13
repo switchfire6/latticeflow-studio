@@ -27,8 +27,15 @@ function isCrystal(x: unknown): x is CrystalStatePayload {
   return Array.isArray(c.atoms) && c.atoms.length > 0 && !!c.lattice && Array.isArray(c.lattice.matrix) && typeof c.formula === "string";
 }
 
+/** Phase C1: the session's model, restored with SET_MODEL after a reconnect. */
+export interface RememberedModel {
+  model_id: string;
+  dispersion: boolean;
+}
+
 export class SessionMemory {
   crystal: CrystalStatePayload | null = null;
+  model: RememberedModel | null = null;
   private readonly key: string | null;
   private readonly delay: number;
   private readonly storageOverride: StorageLike | null | undefined;
@@ -39,6 +46,32 @@ export class SessionMemory {
     this.delay = opts.saveDelayMs ?? 1000;
     this.storageOverride = opts.storage;
     this.crystal = this.load();
+    this.model = this.loadModel();
+  }
+
+  private loadModel(): RememberedModel | null {
+    if (!this.key) return null;
+    try {
+      const raw = this.storage()?.getItem(`${this.key}.model`);
+      if (!raw) return null;
+      const m = JSON.parse(raw) as Partial<RememberedModel>;
+      return typeof m?.model_id === "string" ? { model_id: m.model_id, dispersion: !!m.dispersion } : null;
+    } catch {
+      return null;
+    }
+  }
+
+  /** Remember the session's model (written at once; it changes rarely). */
+  rememberModel(m: RememberedModel | null): void {
+    this.model = m ? { model_id: m.model_id, dispersion: !!m.dispersion } : null;
+    if (!this.key) return;
+    try {
+      const st = this.storage();
+      if (m) st?.setItem(`${this.key}.model`, JSON.stringify(this.model));
+      else if (st?.removeItem) st.removeItem(`${this.key}.model`);
+    } catch {
+      /* ignore */
+    }
   }
 
   private storage(): StorageLike | null {

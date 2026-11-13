@@ -532,26 +532,63 @@ def compute_rdf(atoms: ase.Atoms) -> tuple[np.ndarray, np.ndarray]:
     to ~1e-4 of the peak height. Non-periodic or degenerate cells give g = 0.
     """
     r = RDF_R.copy()
-    g = np.zeros_like(r)
+    pairs = _rdf_pairs(atoms)
+    if pairs is None:
+        return r, np.zeros_like(r)
+    _, _, d, vol = pairs
+    nat = len(atoms)
+    return r, _rdf_smear(d) * (vol / (nat * nat))
+
+
+def _rdf_pairs(atoms: ase.Atoms):
+    """(I, J, d, volume) of every RDF pair (self-pair (i, 0) excluded), or None for unusable input."""
     nat = len(atoms)
     cell = np.array(atoms.cell.array, dtype=float)
     if nat == 0 or not np.all(atoms.pbc) or not np.isfinite(cell).all():
-        return r, g
+        return None
     vol = abs(np.linalg.det(cell))
     if vol < 1e-8:
-        return r, g
+        return None
     found = _pair_vectors(atoms, RDF_CUTOFF, _RDF_MAX_IMAGE_RANGE)
     if found is None:
-        return r, g
+        return None
     ii, jj, nn, d = found
-    d = d[~((ii == jj) & ~nn.any(axis=1))]     # exclude (j, n) == (i, 0)
+    keep = ~((ii == jj) & ~nn.any(axis=1))     # exclude (j, n) == (i, 0)
+    return ii[keep], jj[keep], d[keep], vol
+
+
+def _rdf_smear(d: np.ndarray) -> np.ndarray:
+    """Linear deposition on the fine grid + Gaussian smearing / (4 pi r^2) onto RDF_R (unnormalised)."""
     if len(d) == 0:
-        return r, g
+        return np.zeros_like(RDF_R)
     kernel, n_nodes = _rdf_kernel()
     t = d / _RDF_H
     idx = np.floor(t).astype(np.int64)
     w = t - idx
     hist = np.bincount(idx, weights=1.0 - w, minlength=n_nodes)
     hist += np.bincount(idx + 1, weights=w, minlength=n_nodes)
-    g = (kernel @ hist[:n_nodes]) * (vol / (nat * nat))
-    return r, g
+    return kernel @ hist[:n_nodes]
+
+
+def compute_partial_rdf(atoms: ase.Atoms) -> tuple[np.ndarray, dict[str, np.ndarray]]:
+    """Partial g_AB(r) on the RDF_R grid, same smearing as :func:`compute_rdf` (Phase C1, §5.7).
+
+    g_AB(r) = V / (N_A N_B) sum_{i in A, j in B, images} delta_sigma(r - r_ij) / (4 pi r^2), so every
+    g_AB -> 1 at large r and the total is g = sum_{A,B ordered} c_A c_B g_AB. Keys are "A-B" with the
+    two symbols in alphabetical order (A <= B). Unusable input gives an empty dict.
+    """
+    r = RDF_R.copy()
+    pairs = _rdf_pairs(atoms)
+    if pairs is None:
+        return r, {}
+    ii, jj, d, vol = pairs
+    symbols = np.array(atoms.get_chemical_symbols())
+    species = sorted(set(symbols.tolist()))
+    counts = {sp: int(np.sum(symbols == sp)) for sp in species}
+    si, sj = symbols[ii], symbols[jj]
+    out: dict[str, np.ndarray] = {}
+    for a_i, a in enumerate(species):
+        for b in species[a_i:]:
+            mask = (si == a) & (sj == b)   # ordered pairs i in A, j in B (one direction suffices)
+            out[f"{a}-{b}"] = _rdf_smear(d[mask]) * (vol / (counts[a] * counts[b]))
+    return r, out

@@ -7,6 +7,8 @@
  *   eos         equation of state (after "Compute K")
  *   elastic     elastic tensor C_ij (Phase B, on demand)
  *   xrd         simulated powder diffraction (Phase B, on demand)
+ *   local       local structure: partial g(r), BVS, polyhedra, Glazer tilts (Phase C1, on demand)
+ *   md          molecular dynamics + Arrhenius scan (Phase C1, on demand)
  * Every pane header carries an export menu (CSV / PNG / publication PNG, §4.2).
  * Panes computed with the LJ fallback carry an "analytic fallback" label (§6.4).
  * Collapsed state, height (drag the top edge), hidden panes and pane widths
@@ -25,6 +27,8 @@ import { DiffractionPane } from "./DiffractionPane";
 import { DosPane } from "./DosPane";
 import { ElasticPane } from "./ElasticPane";
 import { EosPane } from "./EosPane";
+import { LocalStructurePane } from "./LocalStructurePane";
+import { MdPane } from "./MdPane";
 import { ExportMenu, usePaneExportItems, type ExportItem } from "./ExportMenu";
 import { PhononControlBar } from "./PhononControlBar";
 import { PhononInfoStrip } from "./PhononInfoStrip";
@@ -38,6 +42,8 @@ const TITLES: Record<DockPane, string> = {
   eos: "Equation of state E(V)",
   elastic: "Elastic tensor C_ij",
   xrd: "Powder diffraction",
+  local: "Local structure",
+  md: "Molecular dynamics",
 };
 const TOGGLE_LABELS: Record<DockPane, string> = {
   dispersion: "dispersion",
@@ -47,9 +53,11 @@ const TOGGLE_LABELS: Record<DockPane, string> = {
   eos: "EOS",
   elastic: "elastic",
   xrd: "XRD",
+  local: "local",
+  md: "MD",
 };
 /** Panes whose numbers come from the uMLIP and get the fallback watermark. */
-const MODEL_PANES: ReadonlySet<DockPane> = new Set<DockPane>(["dispersion", "dos", "eos", "elastic"]);
+const MODEL_PANES: ReadonlySet<DockPane> = new Set<DockPane>(["dispersion", "dos", "eos", "elastic", "md"]);
 
 function PaneExport({ pane, bodyRef }: { pane: DockPane; bodyRef: React.RefObject<HTMLDivElement | null> }) {
   const exportPending = useCrystalStore((s) => s.phononExportPending);
@@ -229,6 +237,10 @@ export function BottomDock() {
                   <ElasticPane />
                 ) : p === "xrd" ? (
                   <DiffractionPane />
+                ) : p === "local" ? (
+                  <LocalStructurePane />
+                ) : p === "md" ? (
+                  <MdPane />
                 ) : (
                   <RelaxationCurve />
                 )}

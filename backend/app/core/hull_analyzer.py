@@ -115,6 +115,10 @@ class HullFetchError(HullError):
     """Fetching reference structures from the Materials Project failed or MP is unreachable."""
 
 
+class HullCancelled(HullError):
+    """``should_cancel()`` returned True while building a reference set (Phase C1 callers only)."""
+
+
 class HullMissingElementalReferenceError(HullError):
     """At least one element of the candidate has no usable elemental reference phase."""
 
@@ -509,13 +513,17 @@ def _select_references(
     return kept, skipped, dropped
 
 
-def _relax_reference(ref: MPReference, atoms: Atoms, engine: "UMLIPEngine") -> RelaxedReference:
+def _relax_reference(
+    ref: MPReference, atoms: Atoms, engine: "UMLIPEngine", should_cancel: Optional[Callable[[], bool]] = None
+) -> RelaxedReference:
     from app.core.relaxer import iter_relaxation
 
     last = None
     for frame in iter_relaxation(
         atoms, engine, fmax=RELAX_FMAX, max_steps=RELAX_MAX_STEPS, relax_cell=True
     ):
+        if should_cancel is not None and should_cancel():
+            raise HullCancelled("reference relaxation cancelled")
         last = frame
     if last is None:  # pragma: no cover - iter_relaxation always yields at least step 0
         raise RuntimeError("relaxation produced no frame")
@@ -550,8 +558,14 @@ def build_reference_set(
     api_key: Optional[str] = None,
     fetcher: Optional[Fetcher] = None,
     max_references: int = MAX_REFERENCES,
+    should_cancel: Optional[Callable[[], bool]] = None,
+    progress: Optional[Callable[[int, int, str], None]] = None,
 ) -> ReferenceSet:
-    """Fetch, select and relax the references of ``chemsys_of(elements)`` (no caching)."""
+    """Fetch, select and relax the references of ``chemsys_of(elements)`` (no caching).
+
+    Optional ``progress(done, total, message)`` is called before every reference relaxation and
+    ``should_cancel()`` is polled per relaxation step (raises :class:`HullCancelled`).
+    """
     t0 = time.perf_counter()
     elements = sorted(set(elements))
     chemsys = chemsys_of(elements)
@@ -567,9 +581,19 @@ def build_reference_set(
 
     kept, skipped, dropped = _select_references(fetched, elements, max_references)
     relaxed: List[RelaxedReference] = []
-    for ref, atoms in kept:
+    for k, (ref, atoms) in enumerate(kept):
+        if should_cancel is not None and should_cancel():
+            raise HullCancelled("reference relaxation cancelled")
+        if progress is not None:
+            try:
+                progress(k, len(kept), f"Relaxing reference {ref.material_id} "
+                         f"({ref.structure.composition.reduced_formula}) {k + 1}/{len(kept)}")
+            except Exception:  # noqa: BLE001 - a broken progress sink must not fail the build
+                pass
         try:
-            relaxed.append(_relax_reference(ref, atoms, engine))
+            relaxed.append(_relax_reference(ref, atoms, engine, should_cancel))
+        except HullCancelled:
+            raise
         except Exception as exc:  # noqa: BLE001 - RelaxationDivergedError, engine errors
             logger.warning("hull: skipping reference %s: relaxation failed (%s)", ref.material_id, exc)
             skipped.append(
@@ -605,8 +629,10 @@ def get_reference_set(
     fetcher: Optional[Fetcher] = None,
     cache: Optional[HullCache] = None,
     max_references: int = MAX_REFERENCES,
+    should_cancel: Optional[Callable[[], bool]] = None,
+    progress: Optional[Callable[[int, int, str], None]] = None,
 ) -> ReferenceSet:
-    """Cached :func:`build_reference_set`."""
+    """Cached :func:`build_reference_set` (``should_cancel`` / ``progress`` only matter on a miss)."""
     cache = cache if cache is not None else get_default_cache()
     chemsys = chemsys_of(elements)
     params = _current_params(max_references)
@@ -618,7 +644,8 @@ def get_reference_set(
         if hit is not None:
             return hit
         refset = build_reference_set(
-            elements, engine, api_key=api_key, fetcher=fetcher, max_references=max_references
+            elements, engine, api_key=api_key, fetcher=fetcher, max_references=max_references,
+            should_cancel=should_cancel, progress=progress,
         )
         cache.put(refset)
         return refset

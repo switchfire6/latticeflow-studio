@@ -292,13 +292,13 @@ export function PhononBandChart() {
         }}
       />
       {summary && (
-        <div className="pointer-events-none absolute top-2 right-3 font-mono text-[10px] text-slate-400">
-          {summary.nBands} branches × {summary.nq} q ·{" "}
+        <div className="pointer-events-none absolute top-2 right-3 left-12 truncate text-right font-mono text-[10px] whitespace-nowrap text-slate-400">
           {summary.imaginaryBands.length ? (
             <span className="text-rose-300">{phonon.imaginary_mode_count} imaginary · min {formatFrequency(phonon.min_frequency_thz, unit)}</span>
           ) : (
             <span className="text-emerald-300">all real</span>
           )}
+          {` · ${summary.nBands} branches × ${summary.nq} q`}
         </div>
       )}
     </div>

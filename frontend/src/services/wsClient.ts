@@ -48,7 +48,9 @@ import type {
 } from "../types/protocol";
 import { registerDefaultSend } from "./phononActions";
 import { SessionMemory } from "./sessionMemory";
+import { historySteps } from "../utils/analysisC";
 import { downloadText } from "../utils/download";
+
 import { pickDefaultEigenmode } from "../utils/phonon";
 import { latticeLengths, phononWarning, relaxationVerdict, sameStructure } from "../utils/structureInfo";
 
@@ -69,6 +71,12 @@ const SERVER_EVENTS: ReadonlySet<string> = new Set<ServerEvent>([
   "ELASTIC_TENSOR_RESULT",
   "PHONON_EXPORT",
   "MODEL_CHANGED",
+  "LOCAL_ANALYSIS_DATA",
+  "FORMATION_ENERGY_RESULT",
+  "SUBSTITUTION_RESULT",
+  "MD_FRAME",
+  "MD_COMPLETE",
+  "COMMITTEE_RESULT",
 ]);
 
 const STREAM_COMMANDS: ReadonlySet<ClientCommand> = new Set<ClientCommand>([
@@ -80,6 +88,10 @@ const STREAM_COMMANDS: ReadonlySet<ClientCommand> = new Set<ClientCommand>([
   "CHECK_PHONON_CONVERGENCE",
   "COMPUTE_ELASTIC_TENSOR",
   "SET_MODEL",
+  "COMPUTE_FORMATION_ENERGY",
+  "SUBSTITUTE_FRACTION",
+  "START_MD",
+  "COMMITTEE_EVALUATE",
 ]);
 
 /** Errors that arrive after a stream's terminal message and must not pop another stream. */
@@ -97,6 +109,10 @@ export const STATE_CHANGING_COMMANDS: ReadonlySet<ClientCommand> = new Set<Clien
   "UNDO",
   "REDO",
   "SET_MODEL",
+  "MAKE_SUPERCELL",
+  "ADD_ATOM",
+  "SUBSTITUTE_FRACTION",
+  "START_MD",
 ]);
 
 export const SESSION_RESTORED_TITLE = "Session restored";
@@ -179,6 +195,27 @@ export function describeError(p: ErrorPayload): { title: string; message: string
       case "NO_PHONON_ANALYSIS":
         return { title: "Phonons out of date", message: `The structure changed since the shake-test; run it again first${detail}.` };
     }
+  }
+  // ---- Phase C1
+  if (p.command === "REQUEST_LOCAL_ANALYSIS") return { title: "Local analysis failed", message: p.message };
+  if (p.command === "MAKE_SUPERCELL") {
+    return { title: p.code === "STRUCTURE_TOO_LARGE" ? "Supercell too large" : "Supercell failed", message: p.message };
+  }
+  if (p.command === "ADD_ATOM") {
+    return { title: p.code === "INVALID_OPERATION" ? "Atom not added" : "Add atom failed", message: p.message || "The position is too close to an existing atom." };
+  }
+  if (p.command === "COMPUTE_FORMATION_ENERGY") {
+    const noKey = /MP_API_KEY/i.test(p.message);
+    return {
+      title: noKey ? "Formation energy unavailable" : "Formation energy failed",
+      message: noKey ? `${p.message} The chemical potentials come from the Materials Project reference phases.` : p.message,
+      level: noKey ? "warning" : undefined,
+    };
+  }
+  if (p.command === "SUBSTITUTE_FRACTION") return { title: "Substitution failed", message: p.message };
+  if (p.command === "START_MD") return { title: "Molecular dynamics failed", message: p.message };
+  if (p.command === "COMMITTEE_EVALUATE") {
+    return { title: p.code === "MODEL_UNAVAILABLE" ? "Model unavailable" : "Model comparison failed", message: p.message };
   }
   if (p.command === "RUN_PHONON_SHAKE_TEST" && p.code === "STRUCTURE_TOO_LARGE") {
     return { title: "Structure too large for phonons", message: `The shake-test supports at most 64 atoms per cell${detail}.` };
@@ -336,6 +373,59 @@ export function dispatchServerMessage(store: CrystalStore, msg: ServerMessage): 
       return;
     }
 
+    // ---- Phase C1
+    case "LOCAL_ANALYSIS_DATA": {
+      s.setLocalAnalysis(msg.payload);
+      return;
+    }
+
+    case "FORMATION_ENERGY_RESULT": {
+      s.setFormation({ result: msg.payload, stateVersion: s.frame.stateVersion });
+      s.clearProgress("COMPUTE_FORMATION_ENERGY");
+      s.endStream({ command: "COMPUTE_FORMATION_ENERGY" });
+      return;
+    }
+
+    case "SUBSTITUTION_RESULT": {
+      // The SINGLE_POINT_UPDATE + HISTORY_STATE of the chosen configuration follow.
+      s.setSubstitution(msg.payload);
+      s.clearProgress("SUBSTITUTE_FRACTION");
+      s.endStream({ command: "SUBSTITUTE_FRACTION" });
+      return;
+    }
+
+    case "COMMITTEE_RESULT": {
+      s.setCommittee({ result: msg.payload, stateVersion: s.frame.stateVersion });
+      s.clearProgress("COMMITTEE_EVALUATE");
+      s.endStream({ command: "COMMITTEE_EVALUATE" });
+      return;
+    }
+
+    case "MD_FRAME": {
+      const p = msg.payload;
+      session.awaitingActorFlags = false;
+      s.clearPhonon();
+      if (s.frame.trails.count) s.frame.trails.reset(0);
+      if (s.latticeRef) s.setLatticeRef(null);
+      s.setRelaxUnconverged(null);
+      const head = s.ensureHeadStream("md", "START_MD");
+      s.ingestCrystal(p.crystal, "md");
+      s.pushMdFrame(head.id, p);
+      s.updateStreamProgress({ step: p.step, totalSteps: session.md.nSteps, energyPerAtom: p.crystal.energy_per_atom, maxForce: p.crystal.max_force });
+      return;
+    }
+
+    case "MD_COMPLETE": {
+      const p = msg.payload;
+      session.awaitingActorFlags = false;
+      s.clearPhonon();
+      s.ingestCrystal(p.final_crystal, "md");
+      s.finishMd("complete", p);
+      s.clearProgress("START_MD");
+      s.endStream({ command: "START_MD" }) ?? (session.streams[0]?.kind === "md" ? s.endStream() : null);
+      return;
+    }
+
     case "BULK_MODULUS_RESULT": {
       const p = msg.payload;
       s.setEosPending(false);
@@ -375,6 +465,7 @@ export function dispatchServerMessage(store: CrystalStore, msg: ServerMessage): 
       else s.endStream({ command: stopped }) ?? s.endStream();
       s.clearProgress(stopped);
       if (stopped === "CHECK_PHONON_CONVERGENCE") session.convergenceArrived = false;
+      if (stopped === "START_MD") s.finishMd("stopped");
       if (s.frame.trails.count && stopped === "START_FLOW_GENERATION") s.frame.trails.endedAt = performance.now();
       return;
     }
@@ -383,7 +474,11 @@ export function dispatchServerMessage(store: CrystalStore, msg: ServerMessage): 
       const p = msg.payload;
       s.setLastError(p);
       const { title, message, level } = describeError(p);
-      s.pushToast(level ?? "error", title, message);
+      const disordered = p.command === "LOAD_STRUCTURE" && p.code === "DISORDERED_STRUCTURE" && !!session.lastLoadText;
+      if (disordered) s.setDisordered({ cif: session.lastLoadText!, message: p.message });
+      s.pushToast(level ?? "error", title, message, disordered ? { kind: "find-orderings", label: "Find ordered approximants" } : undefined);
+      if (p.command === "REQUEST_LOCAL_ANALYSIS") s.setLocalPending(false);
+      if (p.command === "START_MD") s.finishMd("failed");
       if (p.command === "COMPUTE_BULK_MODULUS") s.setEosPending(false);
       if (p.command === "REQUEST_PHONON_DOS") s.setDosPending(false);
       if (p.command === "EXPORT_PHONON_DATA") s.setPhononExportPending(false);
@@ -477,6 +572,15 @@ export class StudioClient {
   }
 
   private chain: RelaxChain | null = null;
+  private listeners = new Set<(msg: ServerMessage) => void>();
+  /** Phase C1: re-send the remembered model once the (restored) structure has loaded. */
+  private modelRestorePending = false;
+
+  /** Observe every server message after it was dispatched (e.g. the Arrhenius scan). Returns an unsubscribe. */
+  addListener(fn: (msg: ServerMessage) => void): () => void {
+    this.listeners.add(fn);
+    return () => this.listeners.delete(fn);
+  }
 
   /** The label of the command waiting for the current relaxation (null = none). */
   get chainedLabel(): string | null {
@@ -556,6 +660,7 @@ export class StudioClient {
       // (the remembered structure is re-sent once that auto-load arrives).
       st.resetSession();
       this.restore = this.opts.memory?.crystal ? "armed" : "idle";
+      this.modelRestorePending = !!this.opts.memory?.model;
       st.setConnection("open", 0);
     };
     sock.onmessage = (ev) => {
@@ -638,6 +743,28 @@ export class StudioClient {
     if (memory && !skipRemember && this.restore !== "armed" && isCommitPoint(msg)) {
       memory.remember(this.store.getState().frame.crystal);
     }
+
+    if (msg.type === "MODEL_CHANGED") {
+      this.modelRestorePending = false;
+      memory?.rememberModel({ model_id: msg.payload.model_id, dispersion: msg.payload.dispersion });
+    }
+    if (this.modelRestorePending && this.restore === "idle" && (msg.type === "SINGLE_POINT_UPDATE" || (msg.type === "ERROR" && msg.payload.command === "LOAD_STRUCTURE"))) {
+      this.modelRestorePending = false;
+      this.restoreModel();
+    }
+
+    for (const fn of this.listeners) fn(msg);
+  }
+
+  /** SET_MODEL for the remembered model unless it is what a fresh session runs anyway. */
+  private restoreModel(): void {
+    const m = this.opts.memory?.model;
+    if (!m) return;
+    const st = this.store.getState();
+    const cur = st.model;
+    if (cur && cur.model_id === m.model_id && cur.dispersion === m.dispersion) return;
+    if (!cur && !m.dispersion && st.models && st.models.default_model_id === m.model_id) return;
+    this.send("SET_MODEL", { model_id: m.model_id, dispersion: m.dispersion });
   }
 
   /** Send without stream bookkeeping or restore cancellation (internal commands). */
@@ -671,6 +798,15 @@ export class StudioClient {
     // The user acted before the server's auto-load arrived: do not overwrite their choice.
     if (this.restore === "armed" && STATE_CHANGING_COMMANDS.has(type)) this.restore = "idle";
     const st = this.store.getState();
+    if (type === "SET_MODEL") this.modelRestorePending = false;
+    if (type === "LOAD_STRUCTURE") {
+      const lp = payload as ClientCommandMap["LOAD_STRUCTURE"];
+      st.session.lastLoadText = "cif" in lp ? lp.cif : "text" in lp ? lp.text : null;
+    }
+    if (type === "START_MD") {
+      const mp = payload as ClientCommandMap["START_MD"];
+      st.resetMd(mp.n_steps ?? 2000, mp.temperature_k ?? 300);
+    }
     if (type === "STOP_STREAM") st.markStopping();
     else if (isStreamingSend(type, payload)) {
       st.beginStream(type as StreamCommand);
@@ -694,6 +830,7 @@ function isCommitPoint(msg: ServerMessage): boolean {
     case "CRYSTAL_STATE_FINAL":
     case "STREAM_STOPPED":
     case "BULK_MODULUS_RESULT":
+    case "MD_COMPLETE":
       return true;
     case "RELAXATION_FRAME":
       return msg.payload.final;
@@ -797,4 +934,26 @@ export const commands = {
   },
   setModel: (p: ClientCommandMap["SET_MODEL"]) => sendOrToast("SET_MODEL", p),
   relaxThen,
+
+  // ---- Phase C1
+  requestLocalAnalysis: (p: ClientCommandMap["REQUEST_LOCAL_ANALYSIS"] = {}) => {
+    const ok = studio.send("REQUEST_LOCAL_ANALYSIS", p);
+    if (ok) studio.store.getState().setLocalPending(true);
+    return ok;
+  },
+  makeSupercell: (matrix: number[][]) => sendOrToast("MAKE_SUPERCELL", { matrix }),
+  addAtom: (element: string, frac: [number, number, number]) => sendOrToast("ADD_ATOM", { element, frac_coords: frac }),
+  computeFormationEnergy: (bulkPosition: number) => sendOrToast("COMPUTE_FORMATION_ENERGY", { bulk_position: bulkPosition }),
+  substitute: (p: ClientCommandMap["SUBSTITUTE_FRACTION"]) => sendOrToast("SUBSTITUTE_FRACTION", p),
+  startMd: (p: ClientCommandMap["START_MD"]) => sendOrToast("START_MD", p),
+  committee: (p: ClientCommandMap["COMMITTEE_EVALUATE"]) => sendOrToast("COMMITTEE_EVALUATE", p),
+  /** Walk the history to `target` with repeated UNDO / REDO (there is no GOTO command). */
+  gotoHistory: (target: number) => {
+    const h = studio.store.getState().history;
+    if (!h) return false;
+    const steps = historySteps(h.position, target);
+    if (!steps) return true;
+    for (let i = 0; i < steps.count; i++) if (!sendOrToast(steps.command, {})) return false;
+    return true;
+  },
 };

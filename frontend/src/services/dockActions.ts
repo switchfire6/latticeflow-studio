@@ -14,6 +14,8 @@ export function availablePanes(s: {
   diffraction?: unknown;
   diffractionPending?: boolean;
   openedPanes?: readonly DockPane[];
+  localAnalysis?: unknown;
+  mdVersion?: number;
 }): DockPane[] {
   const out: DockPane[] = [];
   const opened = s.openedPanes ?? [];
@@ -24,6 +26,8 @@ export function availablePanes(s: {
   if (s.eos || s.eosPending) out.push("eos");
   if (s.elastic || s.streams.some((x) => x.kind === "elastic") || opened.includes("elastic")) out.push("elastic");
   if (s.diffraction || s.diffractionPending || opened.includes("xrd")) out.push("xrd");
+  if (s.localAnalysis || opened.includes("local")) out.push("local");
+  if ((s.mdVersion ?? 0) > 0 || s.streams.some((x) => x.kind === "md") || opened.includes("md")) out.push("md");
   return out;
 }
 
