@@ -4,6 +4,8 @@
  */
 import { apiBaseUrl } from "../config";
 import type {
+  CompareRequest,
+  CompareResponse,
   CrystalStatePayload,
   DiffractionRequest,
   DiffractionResponse,
@@ -13,6 +15,8 @@ import type {
   HullEvaluateRequest,
   HullEvaluateResponse,
   ModelListResponse,
+  MPMatchRequest,
+  MPMatchResponse,
   MPSearchResponse,
   MPStructureResponse,
   OrderingRequest,
@@ -109,6 +113,12 @@ export function createApiClient(opts: ApiClientOptions = {}) {
     // ---- Phase C1
     /** Ordered approximants of a disordered CIF, ranked by energy (POST /api/ordering). */
     ordering: (body: OrderingRequest, signal?: AbortSignal) => postJson<OrderingResponse>("/ordering", body, signal),
+
+    // ---- Phase C2
+    /** Stateless comparison of two structures (POST /api/compare). */
+    compare: (body: CompareRequest, signal?: AbortSignal) => postJson<CompareResponse>("/compare", body, signal),
+    /** Materials Project entries matching a structure (POST /api/mp/match). */
+    mpMatch: (body: MPMatchRequest, signal?: AbortSignal) => postJson<MPMatchResponse>("/mp/match", body, signal),
 
     /** POST /api/export/cif -> { blob, filename } (filename from Content-Disposition). */
     async exportStructure(crystal: CrystalStatePayload, format: ExportFormat | ExportOptions = "cif", signal?: AbortSignal) {

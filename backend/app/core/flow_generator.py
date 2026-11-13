@@ -72,6 +72,15 @@ Endpoint candidates (``_search_endpoint``)
     calls (at least ``MIN_PRERELAX`` = 8), stopping early at fmax 0.01 eV/Å. A
     fixed call count (not a wall-clock budget) keeps runs deterministic.
 
+Top-k candidates (Phase C2, ``top_candidates``; only when the request has top_k > 1)
+    Runs after the last frame, so neither the pre-stream budget nor the per-frame
+    cost changes, and top_k = 1 does no extra work. Rank 1 is the streamed
+    endpoint; the alternates are the search's other structures (scored ones first
+    by extrapolated energy, then the unscored distinct pool by analytic energy),
+    each pre-relaxed under its symmetry with ``CANDIDATE_RELAX_CALLS`` = 8 engine
+    calls + 1 evaluation, deduplicated with ``StructureMatcher``, sorted by energy;
+    at most top_k + 1 alternates are tried (<= 9 (top_k + 1) extra engine calls).
+
 Bulk-modulus steering (heuristic, said plainly)
     With ``target_bulk_modulus_gpa`` = K_t, the endpoint is relaxed to a target
     pressure P* ~ (K_t - K0) / 4, smoothly saturated (P* = c K0 tanh(x / c),
@@ -192,7 +201,13 @@ from ase.data import atomic_numbers, covalent_radii
 from ase.geometry import cell_to_cellpar, cellpar_to_cell, get_distances
 from scipy.optimize import linear_sum_assignment
 
-from app.schemas.messages import FlowTrajectoryFrame, StartFlowGenerationPayload
+from app.schemas.messages import (
+    FlowTrajectoryFrame,
+    GenerationCandidate,
+    GenerationCandidates,
+    GenerationSearchSummary,
+    StartFlowGenerationPayload,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -236,6 +251,8 @@ REP_K = 5.0            # eV/Å, soft-core repulsion used instead of untrusted fo
 F_NORM_CAP = 20.0      # eV/Å, per-atom force cap before normalisation
 N_ORIGIN_SHIFTS = 64
 MAX_Z = 89             # MACE-MP-0 element coverage (H .. Ac)
+CANDIDATE_RELAX_CALLS = 8   # top-k: symmetric pre-relaxation budget per extra candidate (+1 evaluate)
+CANDIDATE_EXTRA_ATTEMPTS = 2  # top-k: alternates tried beyond top_k - 1 (duplicates after relaxation)
 
 REPRESENTATIVE_GROUPS: Dict[str, List[int]] = {
     "cubic": [221, 225, 229, 227, 215, 216, 223, 200, 195, 198],
@@ -702,6 +719,23 @@ class _Endpoint:
     k0_gpa: float = K_GUESS_GPA
     p_target_gpa: float = 0.0
     info: Dict[str, object] = field(default_factory=dict)
+    # top-k (Phase C2): the other searched structures, best first: (combo, frac, cellpar, scored)
+    alternates: List[Tuple[List[List[str]], np.ndarray, np.ndarray, bool]] = field(default_factory=list)
+
+
+def _payload_symbol(number: int, fallback: str) -> str:
+    """Hermann-Mauguin symbol in the payloads' (spglib / pymatgen) spelling, e.g. "P6_3mc"."""
+    try:
+        from pymatgen.symmetry.groups import SpaceGroup
+
+        return str(SpaceGroup.from_int_number(int(number)).symbol)
+    except Exception:  # noqa: BLE001
+        return fallback
+
+
+def _wyckoff_text(elements: Sequence[str], combo: List[List[str]]) -> str:
+    """e.g. "Sr 1a, Ti 1b, O 3c" (several orbits of one species joined with "+")."""
+    return ", ".join(f"{el} {'+'.join(labels)}" for el, labels in zip(elements, combo))
 
 
 def _orbit(wp, rng: np.random.Generator) -> Optional[np.ndarray]:
@@ -829,6 +863,7 @@ class RiemannianFlowGenerator:
         self.current_atoms: Optional[Atoms] = None
         self.final_atoms: Optional[Atoms] = None
         self.last_run_info: Dict[str, object] = {}
+        self._last_search: Optional[Tuple[_Plan, _Endpoint]] = None
 
     # ------------------------------------------------------------ public API
     def iter_frames(self, request: StartFlowGenerationPayload, *,
@@ -918,6 +953,83 @@ class RiemannianFlowGenerator:
                 except asyncio.CancelledError:
                     break
 
+    def top_candidates(self, top_k: int, final_atoms: Atoms, final_crystal, *,
+                       should_cancel: Optional[Callable[[], bool]] = None) -> GenerationCandidates:
+        """Top-k distinct endpoint candidates of the latest run (call after its last frame).
+
+        Rank 1 is always the streamed endpoint (``final_atoms`` / ``final_crystal``, i.e. what
+        CRYSTAL_STATE_FINAL carries). The alternates are the search's other structures in
+        search order (engine-scored ones by extrapolated energy, then unscored pre-screened ones
+        by analytic energy); each is pre-relaxed under its symmetry like the endpoint
+        (``_prerelax`` with ``CANDIDATE_RELAX_CALLS`` = 8 engine calls, same target pressure),
+        evaluated once (CrystalNN bonds) and kept if pymatgen's ``StructureMatcher`` (default
+        tolerances) finds it distinct from every structure kept so far. At most
+        ``top_k - 1 + CANDIDATE_EXTRA_ATTEMPTS`` alternates are tried, i.e. <= 9 engine calls per
+        attempt. Ranks 2.. are sorted by energy; since rank 1 is pinned to the streamed
+        structure, an alternate can (rarely) end lower in energy than rank 1, which then shows as
+        a negative ``relative_energy_mev_per_atom``. Deterministic for a seeded run.
+        """
+        from pymatgen.analysis.structure_matcher import StructureMatcher
+        from pymatgen.io.ase import AseAtomsAdaptor
+
+        if self._last_search is None:
+            raise RuntimeError("top_candidates needs a completed run")
+        plan, ep = self._last_search
+        matcher = StructureMatcher()
+        w, tr, winv = _group_ops(plan.spacegroup)
+        kept = [(final_crystal, ep.labels, AseAtomsAdaptor.get_structure(final_atoms))]
+        extra = []
+        n_new_scored = 0
+        attempts = 0
+        for combo, frac0, par0, scored in ep.alternates:
+            if len(kept) >= top_k or attempts >= top_k - 1 + CANDIDATE_EXTRA_ATTEMPTS:
+                break
+            attempts += 1
+            self._check(should_cancel)
+            frac, par, _ = self._prerelax(plan, frac0, par0, ep.p_target_gpa, CANDIDATE_RELAX_CALLS, should_cancel)
+            try:
+                frac = _sym_positions(frac, _perm_tables(frac, plan.numbers, w, tr), winv, tr)
+            except RuntimeError:          # relaxation drifted off the group: keep the relaxed positions
+                pass
+            par = _constrain_cellpar(plan.system, par)
+            atoms = Atoms(numbers=plan.numbers, scaled_positions=_wrap(frac), cell=_cell(par), pbc=True)
+            self._check(should_cancel)
+            payload = self.engine.evaluate(atoms, bond_mode="crystalnn")
+            if not scored:
+                n_new_scored += 1
+            if not math.isfinite(float(payload.energy_per_atom)):
+                continue
+            struct = AseAtomsAdaptor.get_structure(atoms)
+            if any(matcher.fit(struct, k[2]) for k in kept):
+                continue
+            kept.append((payload, combo, struct))
+            extra.append((payload, combo))
+
+        e1 = float(final_crystal.energy_per_atom)
+        ordered = [(final_crystal, ep.labels)] + sorted(extra, key=lambda x: float(x[0].energy_per_atom))
+        candidates = [
+            GenerationCandidate(
+                rank=i + 1,
+                energy_per_atom=float(c.energy_per_atom),
+                relative_energy_mev_per_atom=(float(c.energy_per_atom) - e1) * 1000.0,
+                spacegroup_symbol=c.spacegroup_symbol,
+                spacegroup_number=int(c.spacegroup_number),
+                wyckoff_assignment=_wyckoff_text(plan.elements, combo),
+                crystal=c,
+            )
+            for i, (c, combo) in enumerate(ordered)
+        ]
+        summary = GenerationSearchSummary(
+            spacegroup_number=plan.spacegroup,
+            spacegroup_symbol=_payload_symbol(plan.spacegroup, plan.symbol),
+            composition=dict(zip(plan.elements, (int(c) for c in plan.counts))),
+            n_wyckoff_combinations=int(ep.info["n_combinations"]),
+            n_structures_screened=int(ep.info["pool_size"]),
+            n_structures_scored=int(ep.info["n_scored"]) + n_new_scored,
+        )
+        self.last_run_info["top_k_attempts"] = attempts
+        return GenerationCandidates(summary=summary, candidates=candidates)
+
     # ------------------------------------------------------------ internals
     def _check(self, should_cancel) -> None:
         if should_cancel is not None and should_cancel():
@@ -993,7 +1105,9 @@ class RiemannianFlowGenerator:
         # force-field scoring with a two-point volume step
         best = None
         n_evals = 0
-        for _, combo, frac, par in shortlist:
+        best_idx = -1
+        scored_alts = []      # (e_min, index in shortlist, combo, frac, cellpar at the extrapolated volume)
+        for idx, (_, combo, frac, par) in enumerate(shortlist):
             v1 = abs(float(np.linalg.det(_cell(par))))
             self._check(should_cancel)
             e1, _, _, p1 = self._efs(frac, par, numbers)
@@ -1020,11 +1134,20 @@ class RiemannianFlowGenerator:
             if v_opt > v2 * math.exp(p2 / k0) * 1.0001:      # contact-limited: no full extrapolation
                 e_min = min(e1, e2)
             e_min = max(e_min, min(e1, e2) - 2.0)
+            scored_alts.append((e_min, idx, combo, frac, _scale_to_volume(par, v_opt)))
             if best is None or e_min < best[0]:
                 best = (e_min, combo, frac, k0, v2, p2, par)
+                best_idx = idx
         if best is None:
             raise ValueError("force field returned non-finite energies for every candidate")
         _, combo, frac, k0, v2, p2, cellpar0 = best
+        # top-k alternates (used only after the stream, see ``top_candidates``): the other scored
+        # structures by extrapolated energy, then the unscored pre-screened ones by analytic energy
+        alternates = [(c, f, cp, True) for _, i, c, f, cp in sorted(scored_alts, key=lambda x: (x[0], x[1]))
+                      if i != best_idx]
+        for _, c, f, par in distinct[len(shortlist):]:
+            v = abs(float(np.linalg.det(_cell(par))))
+            alternates.append((c, f, _scale_to_volume(par, contact_safe(f, par, v)), False))
 
         p_target = 0.0
         if request.target_bulk_modulus_gpa:
@@ -1045,7 +1168,8 @@ class RiemannianFlowGenerator:
         frac = _sym_positions(frac, perm, winv, tr)
         cellpar = _constrain_cellpar(plan.system, cellpar)
 
-        ep = _Endpoint(frac=frac, cellpar=cellpar, labels=combo, perm=perm, k0_gpa=k0, p_target_gpa=p_target)
+        ep = _Endpoint(frac=frac, cellpar=cellpar, labels=combo, perm=perm, k0_gpa=k0, p_target_gpa=p_target,
+                       alternates=alternates)
         ep.info = {
             "n_combinations": len(combos), "pool_size": len(pool), "n_distinct": len(distinct),
             "n_scored": len(shortlist), "engine_calls_before_first_frame": n_evals,
@@ -1154,6 +1278,7 @@ class RiemannianFlowGenerator:
         self._check(should_cancel)
 
         ep = self._search_endpoint(plan, request, rng_cand, should_cancel)
+        self._last_search = (plan, ep)
         s, p_cur, shift = self._prior(plan, ep, request, rng_prior)
         w, tr, winv = _group_ops(plan.spacegroup)
         perm = ep.perm

@@ -6,6 +6,9 @@
  * run means. The "Arrhenius" tab runs MD at several temperatures from the
  * same starting entry (services/mdActions.ts) and fits ln D vs 1/T per
  * element → activation energy and prefactor.
+ * Phase C2: Nernst–Einstein ionic conductivity σ = n q² D / (k_B T) per
+ * species (charge from the bond-valence analysis, else a common oxidation
+ * state; n from the MD cell), after a run and as σ(T) in the Arrhenius tab.
  */
 import { Flame, Play, Square } from "lucide-react";
 import { useState } from "react";
@@ -14,6 +17,7 @@ import { commands } from "../../services/wsClient";
 import { useCrystalStore, type MdSeries } from "../../store/useCrystalStore";
 import { scanPoints, useUi } from "../../store/uiStore";
 import { arrheniusFit, parseTemperatures, sciText } from "../../utils/analysisC";
+import { chargeText, elementCountMap, ionicConductivities, oxidationStatesFromSites, type ConductivityRow } from "../../utils/analysisC2";
 import { LineChart, type LineSeries } from "../charts/LineChart";
 import { SERIES_COLORS } from "./LocalStructurePane";
 import { Button, FallbackTag, NumberField, Segmented, cx, inputCls } from "./ui";
@@ -95,9 +99,50 @@ function LiveCharts({ md }: { md: MdSeries }) {
   );
 }
 
+export const NE_CAVEAT = "Nernst–Einstein (no correlation, Haven ratio = 1)";
+
+/** Charges from the current local analysis (bond-valence oxidation states), if any. */
+function useAnalysisCharges(): Record<string, number> {
+  const sites = useCrystalStore((s) => s.localAnalysis?.data.sites ?? null);
+  return oxidationStatesFromSites(sites);
+}
+
+const plain = (v: number) => (v >= 0.01 && v < 1e4 ? (v >= 100 ? v.toFixed(0) : v.toPrecision(3)) : sciText(v, 2));
+function sigmaText(sigma: number | null): string {
+  if (sigma == null) return "—";
+  return `${plain(sigma)} S/cm · ${plain(sigma * 1000)} mS/cm`;
+}
+const SUP: Record<string, string> = { "0": "⁰", "1": "¹", "2": "²", "3": "³", "4": "⁴", "5": "⁵", "6": "⁶", "7": "⁷", "8": "⁸", "9": "⁹" };
+/** Li⁺, O²⁻; a non-integer bond-valence charge as "Li(+0.98)". */
+function ionLabel(el: string, z: number | null): string {
+  if (z == null) return el;
+  const r = Math.round(z);
+  if (Math.abs(z - r) > 0.05) return `${el}(${chargeText(z)})`;
+  const m = Math.abs(r);
+  return `${el}${m === 1 ? "" : [...String(m)].map((d) => SUP[d]).join("")}${r < 0 ? "⁻" : "⁺"}`;
+}
+
+function ConductivityLine({ rows }: { rows: ConductivityRow[] }) {
+  const shown = rows.filter((r) => r.d != null);
+  if (!shown.length) return null;
+  return (
+    <div className="flex shrink-0 flex-wrap items-baseline gap-x-3 gap-y-0.5 font-mono text-[10.5px]" data-md-sigma>
+      {shown.map((r) => (
+        <span key={r.element} title={`q = ${chargeText(r.charge)}e (${r.chargeSource === "analysis" ? "bond-valence analysis" : r.chargeSource === "guess" ? "common oxidation state" : "unknown"}), n = ${sciText(r.density, 2)} cm⁻³`}>
+          <span className="text-slate-400">σ({ionLabel(r.element, r.charge)}) </span>
+          <span className={r.sigma == null ? "text-slate-600" : "text-emerald-200"}>{sigmaText(r.sigma)}</span>
+        </span>
+      ))}
+      <span className="text-[9.5px] text-slate-500">{NE_CAVEAT}</span>
+    </div>
+  );
+}
+
 function CompleteSummary({ md }: { md: MdSeries }) {
+  const charges = useAnalysisCharges();
   const c = md.complete;
   if (!c) return null;
+  const sigmaRows = ionicConductivities(elementCountMap(c.final_crystal.atoms), c.mean_volume, c.diffusion_coefficients_cm2_s, c.mean_temperature_k, charges);
   const ds = Object.entries(c.diffusion_coefficients_cm2_s).sort(([a], [b]) => a.localeCompare(b));
   return (
     <div className="flex shrink-0 flex-wrap items-baseline gap-x-3 gap-y-0.5 font-mono text-[10.5px]" data-md-result>
@@ -110,6 +155,8 @@ function CompleteSummary({ md }: { md: MdSeries }) {
           <span className={d == null ? "text-slate-600" : "text-cyan-100"}>{d == null ? "no linear regime" : `${sciText(d)} cm²/s`}</span>
         </span>
       ))}
+      <div className="basis-full" />
+      <ConductivityLine rows={sigmaRows} />
     </div>
   );
 }
@@ -117,6 +164,8 @@ function CompleteSummary({ md }: { md: MdSeries }) {
 function ArrheniusTab({ settings, busy }: { settings: MdSettings; busy: boolean }) {
   const scan = useUi((s) => s.arrhenius);
   const canRun = useCrystalStore((s) => s.connection === "open" && s.crystal !== null && s.history !== null);
+  const crystal = useCrystalStore((s) => s.crystal);
+  const charges = useAnalysisCharges();
   const [text, setText] = useState("600 800 1000 1200");
   const temps = parseTemperatures(text);
   const running = scan?.status === "running";
@@ -181,6 +230,45 @@ function ArrheniusTab({ settings, busy }: { settings: MdSettings; busy: boolean 
                 </tr>
               ))}
             </tbody>
+          </table>
+        )}
+        {scan && scan.results.length > 0 && crystal && (
+          <table className="w-full font-mono tabular-nums" data-arrhenius-sigma title={`${NE_CAVEAT}; n from the start cell (${crystal.lattice.volume.toFixed(1)} Å³)`}>
+            <thead className="text-slate-500">
+              <tr>
+                <th className="text-left font-normal">T (K)</th>
+                {els.map((el) => (
+                  <th key={el} className="text-right font-normal">
+                    σ({el}) mS/cm
+                  </th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {scan.results.map((r) => {
+                const rows = ionicConductivities(elementCountMap(crystal.atoms), crystal.lattice.volume, r.d, r.temperatureK, charges);
+                return (
+                  <tr key={r.temperatureK}>
+                    <td className="text-slate-300">{r.temperatureK}</td>
+                    {els.map((el) => {
+                      const sg = rows.find((x) => x.element === el)?.sigma ?? null;
+                      return (
+                        <td key={el} className="text-right text-emerald-200">
+                          {sg == null ? "—" : plain(sg * 1000)}
+                        </td>
+                      );
+                    })}
+                  </tr>
+                );
+              })}
+            </tbody>
+            <tfoot>
+              <tr>
+                <td colSpan={els.length + 1} className="pt-0.5 text-[9.5px] text-slate-500">
+                  {NE_CAVEAT}
+                </td>
+              </tr>
+            </tfoot>
           </table>
         )}
         {scan && scan.results.length > 0 && (

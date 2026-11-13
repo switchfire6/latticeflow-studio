@@ -3,8 +3,9 @@
  * stream progress (flow k/K, relaxation step + max |F|, phonon running) with a
  * Stop button, and the active-eigenmode pill.
  */
-import { Eye, GitBranch, Hand, Loader2, Redo2, Replace, Square, Undo2, Waves, X } from "lucide-react";
+import { Eye, GitBranch, GitCompare, Hand, Loader2, Redo2, Replace, Square, Undo2, Waves, X } from "lucide-react";
 import { followStatusText, transitionText } from "../../utils/followText";
+import { compareWithFollowParent } from "../../services/compareActions";
 import { commands } from "../../services/wsClient";
 import { useSettings } from "../../store/settings";
 import { selectActiveStream, useCrystalStore, type BondColoring, type ToolMode } from "../../store/useCrystalStore";
@@ -139,7 +140,7 @@ export function StreamProgress() {
   let detail: string;
   let frac: number | null = null;
   if (stream.kind === "flow") {
-    title = "Riemannian flow";
+    title = "Symmetric candidate search";
     detail = p.step !== null && p.totalSteps !== null ? `step ${p.step}/${p.totalSteps} · t = ${(p.t ?? 0).toFixed(2)}` : "sampling prior…";
     if (p.step !== null && p.totalSteps) frac = p.step / p.totalSteps;
     if (p.step !== null && p.step === p.totalSteps) detail += " · finalising (CrystalNN, K)";
@@ -171,6 +172,9 @@ export function StreamProgress() {
   } else if (stream.kind === "committee") {
     title = "Model committee";
     detail = p.message || "evaluating with each model";
+  } else if (stream.kind === "prototype") {
+    title = "Prototype search";
+    detail = p.message || "fetching Materials Project prototypes";
   } else {
     title = "Phonon shake-test";
     detail = p.message || `${minLength != null ? `auto (≥ ${minLength} Å)` : supercell.join("×")} supercell · finite displacements`;
@@ -215,6 +219,17 @@ export function FollowBanner() {
         <div className="font-mono text-[10px] text-slate-400">
           Follow Instability · {r.qLabel ?? "q"} ν{r.bandIndex} ({formatFrequency(r.frequencyThz, unit)}), {r.amplitude} Å · {followStatusText(r)}
         </div>
+        {done && (
+          <button
+            type="button"
+            className="mt-1 inline-flex items-center gap-1 rounded-md border border-cyan-400/40 bg-cyan-400/10 px-1.5 py-0.5 text-[10.5px] text-cyan-100 hover:bg-cyan-400/20"
+            onClick={compareWithFollowParent}
+            title="Open the compare panel: parent vs product (space groups, ΔE, lattice, phonons)"
+            data-compare-parent
+          >
+            <GitCompare size={11} /> Compare with parent
+          </button>
+        )}
       </div>
       <button type="button" className="ml-1 text-slate-500 hover:text-slate-200" onClick={() => useCrystalStore.getState().setFollowResult(null)} aria-label="dismiss">
         <X size={12} />

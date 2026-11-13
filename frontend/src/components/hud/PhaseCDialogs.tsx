@@ -3,19 +3,22 @@
  * models" sidebar card, the history list, toasts and the vacancy warning):
  *   supercell      MAKE_SUPERCELL (diagonal n×m×k, √2×√2×2 / 2×2×2 presets),
  *                  resulting atom count and shortest periodic distance (< 10 Å warned)
- *   add-atom       ADD_ATOM (element + fractional coordinates, nearest-atom check)
+ *   add-atom       ADD_ATOM (element + fractional coordinates, nearest-atom check); Phase C2:
+ *                  "pick in viewport" hides the dialog, the viewport (PlacementPlane) raycasts
+ *                  the cell plane s_axis = depth with a ghost atom, a click fills u, v, w
  *   substitution   SUBSTITUTE_FRACTION (from → to, fraction → count, candidates, seed) + SUBSTITUTION_RESULT
  *   formation      COMPUTE_FORMATION_ENERGY against a bulk history entry + FORMATION_ENERGY_RESULT
  *   committee      COMMITTEE_EVALUATE with 2–4 models + COMMITTEE_RESULT and the disagreement flag
  *   ordering       POST /api/ordering for a CIF refused as DISORDERED_STRUCTURE, load a ranked candidate
  */
-import { AlertTriangle, Atom, Boxes, Flame, Grid3x3, Layers, Loader2, Scale, Shuffle, Users, X } from "lucide-react";
+import { AlertTriangle, Atom, Boxes, Flame, GitCompare, Grid3x3, Layers, Loader2, MousePointerClick, Scale, Shuffle, Users, X } from "lucide-react";
 import { useEffect, useState, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 import { ApiError, api } from "../../services/apiClient";
 import { showPane } from "../../services/dockActions";
 import { commands } from "../../services/wsClient";
 import { useCrystalStore } from "../../store/useCrystalStore";
+import { cancelPlacement, startPlacement } from "../../services/placementActions";
 import { useUi, type DialogKind } from "../../store/uiStore";
 import type { OrderingResponse } from "../../types/protocol";
 import { committeeVerdict, resolveHistoryRef } from "../../utils/analysisC";
@@ -29,7 +32,7 @@ import { Badge, Button, CollapsibleCard, FallbackTag, FormulaText, Panel, cx, in
 
 const fx = (v: number | null | undefined, d = 3) => (v == null || !Number.isFinite(v) ? "—" : v.toFixed(d));
 
-function Modal({ title, width = 520, onClose, children }: { title: ReactNode; width?: number; onClose(): void; children: ReactNode }) {
+export function Modal({ title, width = 520, onClose, children }: { title: ReactNode; width?: number; onClose(): void; children: ReactNode }) {
   useEffect(() => {
     const k = (e: KeyboardEvent) => e.key === "Escape" && onClose();
     window.addEventListener("keydown", k);
@@ -53,7 +56,7 @@ function Modal({ title, width = 520, onClose, children }: { title: ReactNode; wi
   );
 }
 
-function Warn({ children }: { children: ReactNode }) {
+export function Warn({ children }: { children: ReactNode }) {
   return (
     <p className="flex gap-1 rounded-md border border-amber-400/30 bg-amber-400/[0.07] px-2 py-1 text-[10.5px] leading-snug text-amber-200">
       <AlertTriangle size={11} className="mt-px shrink-0" />
@@ -222,8 +225,12 @@ export function AddAtomDialog() {
   const crystal = useCrystalStore((s) => s.crystal);
   const selected = useCrystalStore((s) => s.selectedAtom);
   const connected = useCrystalStore((s) => s.connection === "open");
-  const [el, setEl] = useState("Li");
-  const [frac, setFrac] = useState<[string, string, string]>(["0.5", "0.5", "0.5"]);
+  // Phase C2: the fields live in the UI store so they survive "pick in viewport".
+  const el = useUi((s) => s.addAtomDraft.element);
+  const frac = useUi((s) => s.addAtomDraft.frac);
+  const setEl = (element: string) => useUi.getState().setAddAtomDraft({ element });
+  const setFrac = (f: [string, string, string]) => useUi.getState().setAddAtomDraft({ frac: f });
+  const [axis, setAxis] = useState<0 | 1 | 2>(2);
   if (!crystal) return null;
   const f = frac.map((x) => Number.parseFloat(x)) as Vec3;
   const ok = f.every((x) => Number.isFinite(x));
@@ -273,6 +280,29 @@ export function AddAtomDialog() {
             </Button>
           )}
         </div>
+        <div className="rounded-md border border-white/[0.06] bg-white/[0.02] p-1.5" data-pick-viewport>
+          <div className="flex flex-wrap items-center gap-1.5">
+            <span className="text-[10px] text-slate-500">pick in viewport on the plane</span>
+            <select className="rounded border border-white/10 bg-slate-900/80 px-1 py-0.5 font-mono text-[10.5px] text-slate-100 outline-none" value={axis} onChange={(e) => setAxis(Number(e.target.value) as 0 | 1 | 2)} aria-label="plane normal axis">
+              <option value={0}>u (∥ b,c)</option>
+              <option value={1}>v (∥ a,c)</option>
+              <option value={2}>w (∥ a,b)</option>
+            </select>
+            <span className="font-mono text-[10.5px] text-slate-400">= {Number.isFinite(f[axis]!) ? f[axis]!.toFixed(3) : "—"}</span>
+            <Button
+              variant="primary"
+              className="ml-auto px-2 py-0.5 text-[10.5px]"
+              disabled={!Number.isFinite(f[axis]!)}
+              title="Hide this dialog, then click on the cell plane at this depth (Esc cancels)"
+              onClick={() => startPlacement(axis, f[axis]!)}
+            >
+              <MousePointerClick size={11} /> Pick in viewport
+            </Button>
+          </div>
+          <p className="mt-0.5 text-[10px] leading-snug text-slate-500">
+            The depth is the {"uvw"[axis]} field above; use "at selected" first for a plane through an atom.
+          </p>
+        </div>
         <div className="font-mono text-[10.5px] text-slate-400">
           nearest atom: <span className={dmin < 0.5 ? "text-rose-300" : dmin < 1.2 ? "text-amber-300" : "text-slate-100"}>{Number.isFinite(dmin) ? `${dmin.toFixed(2)} Å` : "—"}</span>
           {dmin < 0.5 && " (the server rejects < 0.5 Å)"}
@@ -292,6 +322,34 @@ export function AddAtomDialog() {
         </div>
       </div>
     </Modal>
+  );
+}
+
+/** Floating bar shown while picking (the modal is hidden so the viewport receives the clicks). */
+export function PlacementBar() {
+  const placement = useUi((s) => s.placement);
+  const el = useUi((s) => s.addAtomDraft.element);
+  useEffect(() => {
+    if (!placement) return;
+    const k = (e: KeyboardEvent) => e.key === "Escape" && cancelPlacement();
+    window.addEventListener("keydown", k);
+    return () => window.removeEventListener("keydown", k);
+  }, [placement]);
+  if (!placement) return null;
+  const h = placement.hover;
+  return (
+    <div className="pointer-events-none absolute bottom-16 left-1/2 z-40 -translate-x-1/2">
+      <Panel className="pointer-events-auto flex items-center gap-2 px-3 py-1.5" >
+        <MousePointerClick size={13} className="text-cyan-300" />
+        <span className="font-mono text-[11px] text-slate-200" data-placement>
+          Click on the plane {"uvw"[placement.axis]} = {placement.depth.toFixed(3)} to place {el}
+          {h ? ` · (${h.map((x) => x.toFixed(3)).join(", ")})` : ""}
+        </span>
+        <Button className="px-2 py-0.5 text-[10.5px]" onClick={cancelPlacement}>
+          Cancel
+        </Button>
+      </Panel>
+    </div>
   );
 }
 
@@ -724,7 +782,7 @@ export function OrderingDialog() {
 }
 
 // --------------------------------------------------------------------------- root + sidebar card
-const DIALOGS: Record<DialogKind, () => ReactNode> = {
+const DIALOGS: Partial<Record<DialogKind, () => ReactNode>> = {
   supercell: () => <SupercellDialog />,
   "add-atom": () => <AddAtomDialog />,
   substitution: () => <SubstitutionDialog />,
@@ -735,7 +793,8 @@ const DIALOGS: Record<DialogKind, () => ReactNode> = {
 
 export function PhaseCDialogs() {
   const dialog = useUi((s) => s.dialog);
-  return dialog ? <>{DIALOGS[dialog]()}</> : null;
+  const render = dialog ? DIALOGS[dialog] : undefined;
+  return render ? <>{render()}</> : null;
 }
 
 /** Sidebar card with the Phase C1 workflows. */
@@ -766,8 +825,11 @@ export function DefectsCard() {
         <Button disabled={dis} onClick={() => showPane("md")} title="Molecular dynamics, MSD, diffusion, Arrhenius scan">
           <Flame size={12} /> MD
         </Button>
-        <Button disabled={dis} className="col-span-2" onClick={() => open("committee")} title="Evaluate the structure with 2–4 models (COMMITTEE_EVALUATE)">
+        <Button disabled={dis} onClick={() => open("committee")} title="Evaluate the structure with 2–4 models (COMMITTEE_EVALUATE)">
           <Users size={12} /> Compare models
+        </Button>
+        <Button disabled={!hasCrystal} onClick={() => useUi.getState().openCompare()} title="Two structures side by side: symmetry, ΔE, lattice, phonons (POST /api/compare)">
+          <GitCompare size={12} /> Compare structures
         </Button>
         {disordered && (
           <Button variant="warning" className="col-span-2" onClick={() => open("ordering")}>

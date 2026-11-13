@@ -21,6 +21,10 @@ Error mapping (body is always ``ErrorResponse``, ``code`` an ``ErrorCode`` value
   422 ``INVALID_PAYLOAD`` for an empty 2theta range or unknown radiation.
 * Phase C1 ``/api/ordering``: 422 ``INVALID_STRUCTURE`` (unparsable CIF), 422 ``STRUCTURE_TOO_LARGE``
   (smallest ordered cell > ``max_atoms``), 422 ``MODEL_UNAVAILABLE``.
+* Phase C2 ``/api/compare``: 422 for invalid payloads only (stateless, no engine call).
+  ``/api/mp/match``: like ``/api/mp/*`` (503 no key, 502 upstream failure, 404 ``MP_NOT_FOUND`` only
+  if the client reports it outside a per-entry fetch; entries that vanish are skipped). MP having
+  no entry of the formula is a 200 with ``n_searched = 0``.
 
 The handlers are HTTP-only: ``RequestValidationError`` never arises on the
 WebSocket route (that is ``WebSocketRequestValidationError``), ``ApiError`` is
@@ -52,6 +56,7 @@ from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse, Response
 
 from app.config import get_settings
+from app.core import compare as compare_core
 from app.core import diffraction, hull_analyzer, mp_client, ordering
 from app.core.structure_io import (
     StructureIOError,
@@ -65,6 +70,10 @@ from app.core.structure_io import (
 from app.core.umlip_engine import UMLIPEngine, reduced_formula
 from app.presets import PresetInfo, list_presets
 from app.schemas.api import (
+    CompareRequest,
+    CompareResponse,
+    MPMatchRequest,
+    MPMatchResponse,
     DiffractionRequest,
     DiffractionResponse,
     ErrorResponse,
@@ -408,3 +417,27 @@ def order_structure(req: OrderingRequest) -> OrderingResponse:
         raise _structure_error(exc) from exc
     except Exception as exc:  # noqa: BLE001
         raise _compute_failed("ordering", exc) from exc
+
+
+@router.post("/compare", response_model=CompareResponse, responses=_ERROR_RESPONSES)
+def compare_structures(req: CompareRequest) -> CompareResponse:
+    """Compare two structures: StructureMatcher, group-subgroup relation, volume and energy differences."""
+    atoms_a = _payload_atoms(req.crystal_a)
+    atoms_b = _payload_atoms(req.crystal_b)
+    try:
+        return compare_core.compare(atoms_a, atoms_b, req.crystal_a, req.crystal_b)
+    except Exception as exc:  # noqa: BLE001
+        raise _compute_failed("comparison", exc) from exc
+
+
+@router.post("/mp/match", response_model=MPMatchResponse, responses=_MP_RESPONSES)
+def mp_match(req: MPMatchRequest, ctx: MPContext = Depends(mp_context)) -> MPMatchResponse:
+    """Materials Project entries of the same reduced formula that match the structure (sorted by rms)."""
+    atoms = _payload_atoms(req.crystal)
+    client = _mp(ctx)
+    try:
+        return _mp_call(lambda: compare_core.match_mp(atoms, client))
+    except ApiError:
+        raise
+    except Exception as exc:  # noqa: BLE001
+        raise _compute_failed("MP matching", exc) from exc

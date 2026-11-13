@@ -48,6 +48,7 @@ import type {
 } from "../types/protocol";
 import { registerDefaultSend } from "./phononActions";
 import { SessionMemory } from "./sessionMemory";
+import { snapshots } from "./snapshotCache";
 import { historySteps } from "../utils/analysisC";
 import { downloadText } from "../utils/download";
 
@@ -77,6 +78,8 @@ const SERVER_EVENTS: ReadonlySet<string> = new Set<ServerEvent>([
   "MD_FRAME",
   "MD_COMPLETE",
   "COMMITTEE_RESULT",
+  "GENERATION_CANDIDATES",
+  "PROTOTYPE_CANDIDATES",
 ]);
 
 const STREAM_COMMANDS: ReadonlySet<ClientCommand> = new Set<ClientCommand>([
@@ -92,6 +95,7 @@ const STREAM_COMMANDS: ReadonlySet<ClientCommand> = new Set<ClientCommand>([
   "SUBSTITUTE_FRACTION",
   "START_MD",
   "COMMITTEE_EVALUATE",
+  "PROTOTYPE_SEARCH",
 ]);
 
 /** Errors that arrive after a stream's terminal message and must not pop another stream. */
@@ -216,6 +220,15 @@ export function describeError(p: ErrorPayload): { title: string; message: string
   if (p.command === "START_MD") return { title: "Molecular dynamics failed", message: p.message };
   if (p.command === "COMMITTEE_EVALUATE") {
     return { title: p.code === "MODEL_UNAVAILABLE" ? "Model unavailable" : "Model comparison failed", message: p.message };
+  }
+  // ---- Phase C2
+  if (p.command === "PROTOTYPE_SEARCH") {
+    const noKey = /MP_API_KEY/i.test(p.message);
+    return {
+      title: noKey ? "Prototype search unavailable" : "Prototype search failed",
+      message: noKey ? `${p.message} The prototypes come from the Materials Project.` : p.message,
+      level: noKey ? "warning" : undefined,
+    };
   }
   if (p.command === "RUN_PHONON_SHAKE_TEST" && p.code === "STRUCTURE_TOO_LARGE") {
     return { title: "Structure too large for phonons", message: `The shake-test supports at most 64 atoms per cell${detail}.` };
@@ -401,6 +414,20 @@ export function dispatchServerMessage(store: CrystalStore, msg: ServerMessage): 
       return;
     }
 
+    // ---- Phase C2
+    case "GENERATION_CANDIDATES": {
+      // Sent just before CRYSTAL_STATE_FINAL (rank 1 = the streamed endpoint); not terminal.
+      s.setGenerationCandidates(msg.payload);
+      return;
+    }
+
+    case "PROTOTYPE_CANDIDATES": {
+      s.setPrototypeSearch({ status: "done", result: msg.payload, error: null });
+      s.clearProgress("PROTOTYPE_SEARCH");
+      s.endStream({ command: "PROTOTYPE_SEARCH" }) ?? (session.streams[0]?.kind === "prototype" ? s.endStream() : null);
+      return;
+    }
+
     case "MD_FRAME": {
       const p = msg.payload;
       session.awaitingActorFlags = false;
@@ -466,6 +493,7 @@ export function dispatchServerMessage(store: CrystalStore, msg: ServerMessage): 
       s.clearProgress(stopped);
       if (stopped === "CHECK_PHONON_CONVERGENCE") session.convergenceArrived = false;
       if (stopped === "START_MD") s.finishMd("stopped");
+      if (stopped === "PROTOTYPE_SEARCH" && s.prototypeSearch?.status === "running") s.setPrototypeSearch({ ...s.prototypeSearch, status: "stopped" });
       if (s.frame.trails.count && stopped === "START_FLOW_GENERATION") s.frame.trails.endedAt = performance.now();
       return;
     }
@@ -479,6 +507,7 @@ export function dispatchServerMessage(store: CrystalStore, msg: ServerMessage): 
       s.pushToast(level ?? "error", title, message, disordered ? { kind: "find-orderings", label: "Find ordered approximants" } : undefined);
       if (p.command === "REQUEST_LOCAL_ANALYSIS") s.setLocalPending(false);
       if (p.command === "START_MD") s.finishMd("failed");
+      if (p.command === "PROTOTYPE_SEARCH") s.setPrototypeSearch({ status: "error", result: null, error: { code: p.code, message: p.message } });
       if (p.command === "COMPUTE_BULK_MODULUS") s.setEosPending(false);
       if (p.command === "REQUEST_PHONON_DOS") s.setDosPending(false);
       if (p.command === "EXPORT_PHONON_DATA") s.setPhononExportPending(false);
@@ -807,6 +836,8 @@ export class StudioClient {
       const mp = payload as ClientCommandMap["START_MD"];
       st.resetMd(mp.n_steps ?? 2000, mp.temperature_k ?? 300);
     }
+    if (type === "START_FLOW_GENERATION") st.setGenerationCandidates(null);
+    if (type === "PROTOTYPE_SEARCH") st.setPrototypeSearch({ status: "running", result: null, error: null });
     if (type === "STOP_STREAM") st.markStopping();
     else if (isStreamingSend(type, payload)) {
       st.beginStream(type as StreamCommand);
@@ -850,6 +881,11 @@ function isStreamingSend<K extends ClientCommand>(type: K, payload: ClientComman
 export const sessionMemory = new SessionMemory({ storageKey: "latticeflow.session.v1" });
 export const studio = new StudioClient({ memory: sessionMemory, autoDos: () => useSettings.getState().phonon.autoDos });
 registerDefaultSend((type, payload) => sendOrToast(type, payload));
+// Phase C2: remember the payload of every history entry for compare mode.
+studio.addListener((msg) => {
+  const st = studio.store.getState();
+  snapshots.observe(msg, { crystal: st.frame.crystal, history: st.history, phonon: st.phonon, dos: st.dos });
+});
 
 function sendOrToast<K extends ClientCommand>(type: K, payload: ClientCommandMap[K]): boolean {
   const ok = studio.send(type, payload);
@@ -947,6 +983,10 @@ export const commands = {
   substitute: (p: ClientCommandMap["SUBSTITUTE_FRACTION"]) => sendOrToast("SUBSTITUTE_FRACTION", p),
   startMd: (p: ClientCommandMap["START_MD"]) => sendOrToast("START_MD", p),
   committee: (p: ClientCommandMap["COMMITTEE_EVALUATE"]) => sendOrToast("COMMITTEE_EVALUATE", p),
+  // ---- Phase C2
+  /** LOAD_STRUCTURE {crystal} (a generation / prototype candidate). */
+  loadCrystal: (crystal: CrystalStatePayload) => sendOrToast("LOAD_STRUCTURE", { crystal }),
+  prototypeSearch: (p: ClientCommandMap["PROTOTYPE_SEARCH"]) => sendOrToast("PROTOTYPE_SEARCH", p),
   /** Walk the history to `target` with repeated UNDO / REDO (there is no GOTO command). */
   gotoHistory: (target: number) => {
     const h = studio.store.getState().history;

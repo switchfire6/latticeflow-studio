@@ -25,6 +25,7 @@ import { ForceVectors } from "./ForceVectors";
 import { InstancedAtoms } from "./InstancedAtoms";
 import { InstancedBonds } from "./InstancedBonds";
 import { PhononDisplacement } from "./PhononDisplacement";
+import { PlacementPlane } from "./PlacementPlane";
 import { Polyhedra } from "./Polyhedra";
 import { UnitCellBox } from "./UnitCellBox";
 import { COLORS, createBackgroundTexture } from "./sceneUtils";
@@ -162,6 +163,7 @@ export function CrystalCanvas() {
           <Polyhedra />
           <ForceVectors />
           <FlowTrails />
+          <PlacementPlane />
         </group>
       </group>
 

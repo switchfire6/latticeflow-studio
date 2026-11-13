@@ -24,6 +24,7 @@ import {
   type RelaxationCriteria,
 } from "../../utils/structureInfo";
 import { formatPressure, type PressureUnit } from "../../utils/units";
+import { MpMatchSection } from "./PhaseC2Dialogs";
 import { RelaxationBadge } from "./TelemetryHeader";
 import { Button, CollapsibleCard, FallbackTag, cx } from "./ui";
 
@@ -280,7 +281,10 @@ export function StructurePanel() {
         />
       ) : null}
       {crystal ? (
-        <PropertyActions connected={connected} />
+        <>
+          <PropertyActions connected={connected} />
+          <MpMatchSection />
+        </>
       ) : (
         <p className="text-[11px] text-slate-500">No structure loaded.</p>
       )}

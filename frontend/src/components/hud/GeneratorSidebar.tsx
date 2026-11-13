@@ -6,8 +6,13 @@
  * stoichiometry: a formula ("SrTiO3", "Ca3(PO4)2") plus formula units per
  * cell fills `composition`; the element-only mode lets the server choose the
  * stoichiometry. Sampler internals (η, steps, seed) live under "Advanced".
+ * Phase C2 (§7.5): honest framing ("Generate symmetric candidates": a
+ * Wyckoff-site search scored with the session model, streamed as a
+ * flow-matching style trajectory, not a learned generative model), a top-k
+ * "candidates" control with the ranked GENERATION_CANDIDATES list, and the
+ * "From known prototypes" substitution search.
  */
-import { ChevronDown, ChevronRight, FlaskConical, Grid3x3, Sparkles, Square, X } from "lucide-react";
+import { ChevronDown, ChevronRight, FlaskConical, Grid3x3, Library, Sparkles, Square, X } from "lucide-react";
 import { useState, type KeyboardEvent } from "react";
 import { commands } from "../../services/wsClient";
 import { useCrystalStore } from "../../store/useCrystalStore";
@@ -21,6 +26,8 @@ import { StructureActions } from "./StructureActions";
 import { StructurePanel } from "./StructurePanel";
 import { HistoryPanel } from "./HistoryPanel";
 import { DefectsCard } from "./PhaseCDialogs";
+import { GenerationCandidatesList } from "./PhaseC2Dialogs";
+import { useUi } from "../../store/uiStore";
 import { Button, CollapsibleCard, FormulaText, Slider, Toggle, cx, inputCls } from "./ui";
 
 const FAMILIES: CrystalSystem[] = ["triclinic", "monoclinic", "orthorhombic", "tetragonal", "trigonal", "hexagonal", "cubic"];
@@ -43,6 +50,8 @@ export interface GeneratorForm {
   guidance: number;
   steps: number;
   seed: string;
+  /** Phase C2: number of ranked candidates to return (1–10). */
+  topK: number;
 }
 
 export const DEFAULT_FORM: GeneratorForm = {
@@ -58,6 +67,7 @@ export const DEFAULT_FORM: GeneratorForm = {
   guidance: 1.5,
   steps: 60,
   seed: "",
+  topK: 1,
 };
 
 export interface FormPreview {
@@ -100,6 +110,7 @@ export function buildFlowPayload(f: GeneratorForm): StartFlowGenerationPayload {
     steps: f.steps,
     physics_guidance_scale: f.guidance,
     seed: seed !== null && Number.isFinite(seed) ? seed : null,
+    ...(f.topK > 1 ? { top_k: Math.min(10, Math.max(1, Math.round(f.topK))) } : {}),
   };
   if (f.mode === "formula") {
     const parsed = parseFormula(f.formula);
@@ -237,8 +248,11 @@ function GeneratorCard() {
   };
 
   return (
-    <CollapsibleCard id="generator" title="Inverse Design · Flow Matching" right={<Sparkles size={12} className="text-cyan-300/70" />}>
+    <CollapsibleCard id="generator" title="Generate candidates" right={<Sparkles size={12} className="text-cyan-300/70" />}>
       <div className="space-y-3">
+        <p className="text-[10.5px] leading-snug text-slate-500" data-generator-note>
+          Symmetry-constrained search over Wyckoff assignments, scored with the session model and shown as a flow-matching style trajectory (not a learned generative model).
+        </p>
         <div className="flex rounded-lg border border-white/10 bg-white/[0.02] p-0.5 text-[11px]">
           {(
             [
@@ -385,6 +399,15 @@ function GeneratorCard() {
           )}
         </div>
 
+        <Slider
+          label="Candidates"
+          value={form.topK}
+          min={1}
+          max={10}
+          onChange={(topK) => set({ topK })}
+          format={(v) => (v === 1 ? "best only" : `top ${v}`)}
+        />
+
         <Button variant={flowStream ? "danger" : "primary"} className="w-full py-2 text-[13px]" disabled={!connected || (!flowStream && !preview.ok)} onClick={synthesize}>
           {flowStream ? (
             <>
@@ -392,9 +415,13 @@ function GeneratorCard() {
             </>
           ) : (
             <>
-              <Sparkles size={14} /> Synthesize Crystal (Riemannian Flow)
+              <Sparkles size={14} /> Generate symmetric candidates
             </>
           )}
+        </Button>
+        <GenerationCandidatesList />
+        <Button className="w-full" disabled={!connected} onClick={() => useUi.getState().openDialog("prototype")} title="Ionic substitution into known Materials Project prototypes (PROTOTYPE_SEARCH)">
+          <Library size={12} /> From known prototypes…
         </Button>
       </div>
     </CollapsibleCard>

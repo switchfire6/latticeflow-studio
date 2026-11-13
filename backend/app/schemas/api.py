@@ -200,7 +200,7 @@ class CompareResponse(BaseModel):
     max_displacement: Optional[float] = None
     spacegroup_a: str
     spacegroup_b: str
-    group_subgroup: Optional[str] = None     # "b is a subgroup of a" / "a is a subgroup of b" / "unrelated" / None
+    group_subgroup: Optional[str] = None     # "b is a subgroup of a" / "a is a subgroup of b" / "same space group" / "unrelated" / None (space-group types only)
     volume_per_atom_a: float
     volume_per_atom_b: float
     volume_change_percent: float             # (b - a) / a

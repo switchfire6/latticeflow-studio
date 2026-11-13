@@ -1,0 +1,28 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "latticeflow-client"
+version = "0.1.0"
+description = "Python client for LatticeFlow Studio: drive the /ws/studio session and the /api REST endpoints from scripts and notebooks"
+requires-python = ">=3.10"
+dependencies = [
+    "websockets>=13",   # websockets.sync.client
+    "httpx",
+]
+
+[project.optional-dependencies]
+ase = ["ase"]
+pymatgen = ["pymatgen"]
+test = ["pytest"]
+
+[project.scripts]
+latticeflow-screen = "latticeflow_client.screen:main"
+
+[tool.hatch.build.targets.wheel]
+packages = ["latticeflow_client"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+asyncio_default_fixture_loop_scope = "function"   # silences pytest-asyncio when it is installed

@@ -12,7 +12,8 @@ import { TransmuteToolbar } from "./components/hud/TransmuteToolbar";
 import { ViewportDropZone } from "./components/hud/ImportExport";
 import { refreshModels } from "./components/hud/ModelPicker";
 import { Scorecard } from "./components/hud/Scorecard";
-import { PhaseCDialogs } from "./components/hud/PhaseCDialogs";
+import { PhaseCDialogs, PlacementBar } from "./components/hud/PhaseCDialogs";
+import { PhaseC2Dialogs } from "./components/hud/PhaseC2Dialogs";
 import { useLocalAnalysisAutoRefresh } from "./services/localActions";
 import { DisplayPanel, EigenmodePill, FollowBanner, StreamProgress, ToolModeBar } from "./components/hud/ViewportOverlays";
 import { api } from "./services/apiClient";
@@ -135,6 +136,8 @@ export function App() {
           <TransmuteToolbar />
           <Toasts />
           <PhaseCDialogs />
+          <PhaseC2Dialogs />
+          <PlacementBar />
         </ViewportDropZone>
       </div>
       <BottomDock />

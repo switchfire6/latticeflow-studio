@@ -1,0 +1,8 @@
+# composition = atoms per (conventional) cell; target_spacegroup / top_k / seed are optional
+composition,target_spacegroup,top_k,seed
+SrTiO3,221,3,0
+BaTiO3,221,3,0
+KNbO3,,3,0
+Na4Cl4,225,1,0
+Si8,227,1,0
+Mg2Si1O4,,3,0

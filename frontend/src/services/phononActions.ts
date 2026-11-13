@@ -5,6 +5,7 @@
 import { summarize, useCrystalStore, type CrystalStore } from "../store/useCrystalStore";
 import type { ClientCommand, ClientCommandMap, Eigenmode, PhononAnalysisComplete } from "../types/protocol";
 import { formatKLabel, qLabelAt } from "../utils/bandChart";
+import { snapshots } from "./snapshotCache";
 
 export type Send = <K extends ClientCommand>(type: K, payload: ClientCommandMap[K]) => boolean;
 
@@ -61,6 +62,8 @@ export function followSelectedInstability(amplitude: number, store: CrystalStore
     max_steps: 200,
   });
   if (!ok) return false;
+  // Phase C2: keep the parent (with its phonons) for "Compare with parent".
+  snapshots.setFollowParent({ crystal, history: st.history }, st.phonon, st.dos);
   st.setFollowResult({
     from: summarize(crystal),
     to: null,

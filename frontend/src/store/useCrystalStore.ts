@@ -19,7 +19,9 @@ import type {
   ClientCommand,
   CommitteeResult,
   FormationEnergyResult,
+  GenerationCandidates,
   LocalAnalysisData,
+  PrototypeCandidates,
   MDComplete,
   MDFrame,
   SubstitutionResult,
@@ -69,8 +71,10 @@ export type StreamCommand = Extract<
   | "SUBSTITUTE_FRACTION"
   | "START_MD"
   | "COMMITTEE_EVALUATE"
+  // Phase C2
+  | "PROTOTYPE_SEARCH"
 >;
-export type StreamKind = "flow" | "relaxation" | "phonon" | "elastic" | "model" | "formation" | "substitution" | "md" | "committee";
+export type StreamKind = "flow" | "relaxation" | "phonon" | "elastic" | "model" | "formation" | "substitution" | "md" | "committee" | "prototype";
 
 export function streamKind(command: StreamCommand): StreamKind {
   if (command === "START_FLOW_GENERATION") return "flow";
@@ -81,6 +85,7 @@ export function streamKind(command: StreamCommand): StreamKind {
   if (command === "SUBSTITUTE_FRACTION") return "substitution";
   if (command === "START_MD") return "md";
   if (command === "COMMITTEE_EVALUATE") return "committee";
+  if (command === "PROTOTYPE_SEARCH") return "prototype";
   return "relaxation"; // START_RELAXATION, FOLLOW_INSTABILITY, PERTURB(auto_relax)
 }
 
@@ -331,6 +336,13 @@ export const emptyMdSeries = (): MdSeries => ({
 });
 export const MD_SERIES_LIMIT = 5000;
 
+/** Phase C2: PROTOTYPE_SEARCH lifecycle (results stay until the next search). */
+export interface PrototypeSearchState {
+  status: "running" | "done" | "stopped" | "error";
+  result: PrototypeCandidates | null;
+  error: { code: string; message: string } | null;
+}
+
 /** A relaxation that stopped at max_steps without converging ("Continue relaxation"). */
 export interface UnconvergedRelaxation {
   steps: number;
@@ -447,6 +459,11 @@ export interface CrystalStoreState {
   /** A LOAD_STRUCTURE refused as DISORDERED_STRUCTURE: its CIF, for "Find ordered approximants". */
   disordered: { cif: string; message: string } | null;
 
+  // Phase C2
+  /** GENERATION_CANDIDATES of the latest generation (cleared when a new one starts). */
+  generationCandidates: GenerationCandidates | null;
+  prototypeSearch: PrototypeSearchState | null;
+
   // misc
   relaxHistory: RelaxPoint[];
   toasts: Toast[];
@@ -541,6 +558,10 @@ export interface CrystalStoreState {
   resetMd(nSteps: number | null, temperature: number | null): void;
   pushMdFrame(streamId: number, f: MDFrame): void;
   finishMd(status: MdSeries["status"], complete?: MDComplete | null): void;
+
+  // Phase C2
+  setGenerationCandidates(c: GenerationCandidates | null): void;
+  setPrototypeSearch(p: PrototypeSearchState | null): void;
 
   setToolMode(mode: ToolMode): void;
   selectAtom(index: number | null): void;
@@ -666,6 +687,8 @@ export function createCrystalStore(opts: CrystalStoreOptions = {}) {
       committee: null,
       mdVersion: 0,
       disordered: null,
+      generationCandidates: null,
+      prototypeSearch: null,
       relaxHistory: [],
       toasts: [],
       lastError: null,
@@ -704,6 +727,7 @@ export function createCrystalStore(opts: CrystalStoreOptions = {}) {
           convergence: null,
           phononExportPending: false,
           localPending: false,
+          prototypeSearch: s.prototypeSearch?.status === "running" ? { ...s.prototypeSearch, status: "stopped" } : s.prototypeSearch,
         }));
         if (session.md.status === "running") session.md.status = "stopped";
         publishNow();
@@ -935,6 +959,9 @@ export function createCrystalStore(opts: CrystalStoreOptions = {}) {
         mdVersion++;
         publishNow();
       },
+
+      setGenerationCandidates: (generationCandidates) => set({ generationCandidates }),
+      setPrototypeSearch: (prototypeSearch) => set({ prototypeSearch }),
 
       setToolMode: (toolMode) => set({ toolMode }),
       selectAtom: (index) => set({ selectedAtom: index !== null && index >= 0 && index < frame.n ? index : null }),

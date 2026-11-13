@@ -159,6 +159,29 @@ Phase C1 commands (IMPROVEMENT_SUGGESTIONS.md §5.7-5.10, §6.2)
   before each model (done = models finished, total = number of models) and at
   the end; terminal ``COMMITTEE_RESULT``. Unknown / unloadable model:
   ``ERROR MODEL_UNAVAILABLE``.
+
+Phase C2 commands (IMPROVEMENT_SUGGESTIONS.md §7.5)
+---------------------------------------------------
+* ``START_FLOW_GENERATION`` with ``top_k`` > 1: after the last frame the worker
+  also runs ``RiemannianFlowGenerator.top_candidates`` (extra symmetric
+  relaxations of the search's other structures, <= 9 engine calls per tried
+  alternate, at most top_k + 1 alternates; pre-stream budget and per-frame cost
+  unchanged). The terminal group is then ``GENERATION_CANDIDATES``,
+  ``CRYSTAL_STATE_FINAL``, ``HISTORY_STATE`` (one ``_apply_job_output``, so it is
+  atomic like every terminal group). Rank 1 is the streamed endpoint, i.e. the
+  ``CRYSTAL_STATE_FINAL`` crystal that becomes active; the other candidates are not
+  applied (the client loads one with ``LOAD_STRUCTURE``). A stop during the extra
+  relaxations is an ordinary stop after the last frame (``STREAM_STOPPED``, history
+  "Flow generation (stopped)", the endpoint stays active). top_k = 1 sends exactly
+  the Phase A sequence.
+* ``PROTOTYPE_SEARCH`` (streaming, reads nothing, no history push, needs no active
+  structure): ``prototypes.search`` with the session engine and the MP client of
+  ``prototype_client(MP_API_KEY)``; ``PROGRESS`` per source formula, hull reference
+  and candidate relaxation; terminal ``PROTOTYPE_CANDIDATES``. No / malformed key:
+  ``ERROR INVALID_OPERATION`` explaining ``MP_API_KEY``; MP / hull fetch failure:
+  ``COMPUTE_FAILED``; non-ionic composition, no prototypes found or another
+  ``ValueError``: ``INVALID_OPERATION``. Cancellable at every MP call, relaxation
+  step and hull reference.
 """
 
 from __future__ import annotations
@@ -234,6 +257,8 @@ from app.schemas.messages import (
     RequestLocalAnalysisPayload,
     StartMDPayload,
     SubstituteFractionPayload,
+    # Phase C2
+    PrototypeSearchPayload,
 )
 
 logger = logging.getLogger(__name__)
@@ -290,12 +315,14 @@ _PAYLOAD_MODELS: Dict[ClientCommand, type] = {
     _C.SUBSTITUTE_FRACTION: SubstituteFractionPayload,
     _C.START_MD: StartMDPayload,
     _C.COMMITTEE_EVALUATE: CommitteeEvaluatePayload,
+    _C.PROTOTYPE_SEARCH: PrototypeSearchPayload,
 }
 _STREAMING = frozenset(
     {
         _C.START_FLOW_GENERATION, _C.START_RELAXATION, _C.RUN_PHONON_SHAKE_TEST, _C.FOLLOW_INSTABILITY,
         _C.CHECK_PHONON_CONVERGENCE, _C.COMPUTE_ELASTIC_TENSOR, _C.SET_MODEL,
         _C.COMPUTE_FORMATION_ENERGY, _C.SUBSTITUTE_FRACTION, _C.START_MD, _C.COMMITTEE_EVALUATE,
+        _C.PROTOTYPE_SEARCH,
     }
 )
 _INIT = "__INIT__"  # internal first FIFO item: load the default preset
@@ -739,6 +766,7 @@ class StudioSession:
             _C.SUBSTITUTE_FRACTION.value: self._cmd_substitute,
             _C.START_MD.value: self._cmd_md,
             _C.COMMITTEE_EVALUATE.value: self._cmd_committee,
+            _C.PROTOTYPE_SEARCH.value: self._cmd_prototype_search,
         }[command.type]
         await handler(command.payload)
 
@@ -1217,10 +1245,12 @@ class StudioSession:
             job.check()
             crystal.bulk_modulus_gpa = relaxer.estimate_bulk_modulus(final, engine)
             job.check()
-            self._emit_terminal(
-                job, [_message(ServerEvent.CRYSTAL_STATE_FINAL, CrystalStateFinal(crystal=crystal))], final, crystal,
-                history_label=job.label,
-            )
+            messages = [_message(ServerEvent.CRYSTAL_STATE_FINAL, CrystalStateFinal(crystal=crystal))]
+            if p.top_k > 1:
+                candidates = generator.top_candidates(p.top_k, final, crystal, should_cancel=job.cancel.is_set)
+                job.check()
+                messages.insert(0, _message(ServerEvent.GENERATION_CANDIDATES, candidates))
+            self._emit_terminal(job, messages, final, crystal, history_label=job.label)
 
         self._launch(_C.START_FLOW_GENERATION.value, "Flow generation", worker)
 
@@ -1660,6 +1690,49 @@ class StudioSession:
             self._emit_terminal(job, [_message(ServerEvent.COMMITTEE_RESULT, result)], None, None)
 
         self._launch(_C.COMMITTEE_EVALUATE.value, "Committee", worker)
+
+    async def _cmd_prototype_search(self, p: PrototypeSearchPayload) -> None:
+        engine = await self._get_engine()
+        await self._end_job()
+        api_key = get_settings().mp_api_key
+
+        def worker(job: _Job) -> None:
+            from app.core import hull_analyzer, mp_client, prototypes
+
+            def progress(done: int, total: int, message: str = "") -> None:
+                self._post_progress(job, done, total, message)
+
+            try:
+                client = prototype_client(api_key)
+                result = prototypes.search(p, engine, client=client, api_key=api_key,
+                                           should_cancel=job.cancel.is_set, progress=progress)
+            except (prototypes.PrototypeCancelled, hull_analyzer.HullCancelled):
+                raise _JobCancelled() from None
+            except (mp_client.MPNoApiKeyError, hull_analyzer.HullNoApiKeyError) as exc:
+                job.check()
+                raise CommandError(
+                    ErrorCode.INVALID_OPERATION,
+                    f"prototype search needs Materials Project structures: {exc}. "
+                    "Set MP_API_KEY (a 32-character Materials Project API key) in the backend environment.",
+                ) from None
+            except (mp_client.MPFetchError, hull_analyzer.HullFetchError,
+                    hull_analyzer.HullMissingElementalReferenceError) as exc:
+                job.check()
+                raise CommandError(ErrorCode.COMPUTE_FAILED, f"Materials Project request failed: {exc}") from None
+            except ValueError as exc:
+                job.check()
+                raise CommandError(ErrorCode.INVALID_OPERATION, str(exc)) from None
+            job.check()
+            self._emit_terminal(job, [_message(ServerEvent.PROTOTYPE_CANDIDATES, result)], None, None)
+
+        self._launch(_C.PROTOTYPE_SEARCH.value, "Prototype search", worker)
+
+
+def prototype_client(api_key: Optional[str]):
+    """MP client of ``PROTOTYPE_SEARCH`` (test seam; raises ``MPNoApiKeyError`` without a key)."""
+    from app.core import mp_client
+
+    return mp_client.MaterialsProjectClient(api_key)
 
 
 # --------------------------------------------------------------------------- #
