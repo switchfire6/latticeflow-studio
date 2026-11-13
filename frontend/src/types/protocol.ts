@@ -99,6 +99,7 @@ export interface StartFlowGenerationPayload {
   steps?: number; // 2–500, default 60
   physics_guidance_scale?: number; // ≥ 0, default 1.5
   seed?: number | null;
+  top_k?: number; // Phase C2: 1–10; > 1 adds GENERATION_CANDIDATES before CRYSTAL_STATE_FINAL
 }
 
 export interface PerturbOrTransmuteAtomPayload {
@@ -200,6 +201,7 @@ export interface ClientCommandMap {
   SUBSTITUTE_FRACTION: SubstituteFractionPayload;
   START_MD: StartMDPayload;
   COMMITTEE_EVALUATE: CommitteeEvaluatePayload;
+  PROTOTYPE_SEARCH: PrototypeSearchPayload; // Phase C2
 }
 export type ClientCommand = keyof ClientCommandMap;
 
@@ -442,6 +444,8 @@ export interface ServerEventMap {
   MD_FRAME: MDFrame;
   MD_COMPLETE: MDComplete;
   COMMITTEE_RESULT: CommitteeResult;
+  GENERATION_CANDIDATES: GenerationCandidates; // Phase C2
+  PROTOTYPE_CANDIDATES: PrototypeCandidates;
 }
 export type ServerEvent = keyof ServerEventMap;
 
@@ -754,4 +758,92 @@ export interface OrderingResponse {
   n_enumerated: number;
   candidates: OrderingCandidate[];
   method: string;
+}
+
+// --------------------------------------------------------------------------- //
+// Phase C2 (IMPROVEMENT_SUGGESTIONS.md §7.2, §7.5)
+// --------------------------------------------------------------------------- //
+/** Not state-changing; terminal PROTOTYPE_CANDIDATES; load one with LOAD_STRUCTURE {crystal}. */
+export interface PrototypeSearchPayload {
+  composition: Record<string, number>;
+  max_candidates?: number; // default 8
+  probability_threshold?: number; // default 1e-3
+  relax?: boolean; // default true
+  with_e_hull?: boolean; // default true
+}
+export interface GenerationSearchSummary {
+  spacegroup_number: number;
+  spacegroup_symbol: string;
+  composition: Record<string, number>;
+  n_wyckoff_combinations: number;
+  n_structures_screened: number;
+  n_structures_scored: number;
+}
+export interface GenerationCandidate {
+  rank: number; // 1 = streamed endpoint
+  energy_per_atom: number;
+  relative_energy_mev_per_atom: number;
+  spacegroup_symbol: string;
+  spacegroup_number: number;
+  wyckoff_assignment: string;
+  crystal: CrystalStatePayload;
+}
+/** Sent just before CRYSTAL_STATE_FINAL when top_k > 1. */
+export interface GenerationCandidates {
+  summary: GenerationSearchSummary;
+  candidates: GenerationCandidate[];
+}
+export interface PrototypeCandidate {
+  rank: number;
+  formula: string;
+  source_material_id: string;
+  source_formula: string;
+  substitutions: Record<string, string>;
+  probability: number;
+  spacegroup_symbol: string;
+  energy_per_atom: number;
+  e_hull_ev: number | null;
+  relaxed: boolean;
+  crystal: CrystalStatePayload;
+}
+export interface PrototypeCandidates {
+  target_formula: string;
+  n_sources: number;
+  candidates: PrototypeCandidate[];
+  method: string;
+}
+
+// REST: POST /api/compare, POST /api/mp/match
+export interface CompareRequest {
+  crystal_a: CrystalStatePayload;
+  crystal_b: CrystalStatePayload;
+}
+export interface CompareResponse {
+  same_composition: boolean;
+  structures_match: boolean;
+  rms_displacement: number | null;
+  max_displacement: number | null;
+  spacegroup_a: string;
+  spacegroup_b: string;
+  group_subgroup: string | null;
+  volume_per_atom_a: number;
+  volume_per_atom_b: number;
+  volume_change_percent: number;
+  energy_per_atom_a: number;
+  energy_per_atom_b: number;
+  energy_difference_mev_per_atom: number;
+  energy_difference_mev_per_formula_unit: number | null;
+  method: string;
+}
+export interface MPMatchRequest {
+  crystal: CrystalStatePayload;
+}
+export interface MPMatch {
+  entry: MPEntry;
+  rms_displacement: number;
+}
+export interface MPMatchResponse {
+  formula: string;
+  n_searched: number;
+  matches: MPMatch[];
 }

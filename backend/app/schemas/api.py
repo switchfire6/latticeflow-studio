@@ -181,3 +181,48 @@ class OrderingResponse(BaseModel):
     n_enumerated: int                                     # configurations generated before ranking
     candidates: List[OrderingCandidate]
     method: str
+
+
+# --------------------------------------------------------------------------- #
+# Phase C2 (IMPROVEMENT_SUGGESTIONS.md §7.2): structure comparison and MP matching
+# --------------------------------------------------------------------------- #
+class CompareRequest(BaseModel):
+    """POST /api/compare: compare two structures (stateless)."""
+
+    crystal_a: CrystalStatePayload
+    crystal_b: CrystalStatePayload
+
+
+class CompareResponse(BaseModel):
+    same_composition: bool
+    structures_match: bool                   # pymatgen StructureMatcher (default tolerances, primitive cells)
+    rms_displacement: Optional[float] = None    # normalised StructureMatcher rms (only when matching)
+    max_displacement: Optional[float] = None
+    spacegroup_a: str
+    spacegroup_b: str
+    group_subgroup: Optional[str] = None     # "b is a subgroup of a" / "a is a subgroup of b" / "unrelated" / None
+    volume_per_atom_a: float
+    volume_per_atom_b: float
+    volume_change_percent: float             # (b - a) / a
+    energy_per_atom_a: float                 # as carried by the payloads (same model assumed)
+    energy_per_atom_b: float
+    energy_difference_mev_per_atom: float    # b - a
+    energy_difference_mev_per_formula_unit: Optional[float] = None   # when compositions are equal
+    method: str
+
+
+class MPMatchRequest(BaseModel):
+    """POST /api/mp/match: which Materials Project entries does this structure match?"""
+
+    crystal: CrystalStatePayload
+
+
+class MPMatch(BaseModel):
+    entry: MPEntry
+    rms_displacement: float
+
+
+class MPMatchResponse(BaseModel):
+    formula: str
+    n_searched: int                          # MP entries of the same reduced formula
+    matches: List[MPMatch]                   # sorted by rms

@@ -47,6 +47,8 @@ class ClientCommand(str, Enum):
     SUBSTITUTE_FRACTION = "SUBSTITUTE_FRACTION"             # streaming, state-changing
     START_MD = "START_MD"                                   # streaming, state-changing
     COMMITTEE_EVALUATE = "COMMITTEE_EVALUATE"               # streaming, not state-changing
+    # Phase C2
+    PROTOTYPE_SEARCH = "PROTOTYPE_SEARCH"                   # streaming, not state-changing
 
 
 class ServerEvent(str, Enum):
@@ -75,6 +77,9 @@ class ServerEvent(str, Enum):
     MD_FRAME = "MD_FRAME"
     MD_COMPLETE = "MD_COMPLETE"
     COMMITTEE_RESULT = "COMMITTEE_RESULT"
+    # Phase C2
+    GENERATION_CANDIDATES = "GENERATION_CANDIDATES"
+    PROTOTYPE_CANDIDATES = "PROTOTYPE_CANDIDATES"
 
 
 class Envelope(BaseModel):
@@ -95,6 +100,11 @@ class StartFlowGenerationPayload(BaseModel):
     steps: int = Field(default=60, ge=2, le=500)
     physics_guidance_scale: float = Field(default=1.5, ge=0)
     seed: Optional[int] = None
+    # ---- Phase C2 (IMPROVEMENT_SUGGESTIONS.md §7.5)
+    top_k: int = Field(default=1, ge=1, le=10)
+    #   > 1: after the stream, the server also sends GENERATION_CANDIDATES (just before CRYSTAL_STATE_FINAL)
+    #   with the top_k distinct endpoint candidates of the search, each relaxed under its symmetry and
+    #   ranked by energy; the streamed trajectory still lands on rank 1, which becomes active.
 
 
 class PerturbOrTransmuteAtomPayload(BaseModel):
@@ -648,3 +658,65 @@ class CommitteeResult(BaseModel):
 
 
 HistoryState.model_rebuild()
+
+
+# =========================================================================== #
+# Phase C2 (IMPROVEMENT_SUGGESTIONS.md §7.2, §7.5)
+# =========================================================================== #
+class PrototypeSearchPayload(BaseModel):
+    """Ionic-substitution search over known Materials Project prototypes (pymatgen SubstitutionPredictor).
+
+    Not state-changing. PROGRESS while sources are fetched and candidates relaxed; terminal
+    PROTOTYPE_CANDIDATES. The client loads a chosen candidate with LOAD_STRUCTURE {crystal}.
+    Needs MP_API_KEY (INVALID_OPERATION with an explanation otherwise)."""
+
+    composition: Dict[str, int]              # target, e.g. {"Na": 1, "Nb": 1, "O": 3} (reduced or per cell)
+    max_candidates: int = Field(default=8, ge=1, le=30)
+    probability_threshold: float = Field(default=1e-3, gt=0, lt=1)
+    relax: bool = True                       # relax each candidate (positions + cell, fmax 0.05)
+    with_e_hull: bool = True                 # E_hull of each candidate against the uMLIP reference hull
+
+
+class GenerationSearchSummary(BaseModel):
+    spacegroup_number: int
+    spacegroup_symbol: str
+    composition: Dict[str, int]
+    n_wyckoff_combinations: int              # distinct Wyckoff assignments explored
+    n_structures_screened: int               # pre-screened with the analytic potential
+    n_structures_scored: int                 # scored with the session engine
+
+
+class GenerationCandidate(BaseModel):
+    rank: int                                # 1 = lowest energy (the streamed endpoint)
+    energy_per_atom: float
+    relative_energy_mev_per_atom: float
+    spacegroup_symbol: str
+    spacegroup_number: int
+    wyckoff_assignment: str                  # e.g. "Sr 1a, Ti 1b, O 3c"
+    crystal: CrystalStatePayload
+
+
+class GenerationCandidates(BaseModel):
+    summary: GenerationSearchSummary
+    candidates: List[GenerationCandidate]
+
+
+class PrototypeCandidate(BaseModel):
+    rank: int
+    formula: str
+    source_material_id: str                  # MP prototype the candidate was derived from
+    source_formula: str
+    substitutions: Dict[str, str]            # source species -> target species, e.g. {"K": "Na", "Ta": "Nb"}
+    probability: float                       # SubstitutionPredictor probability
+    spacegroup_symbol: str
+    energy_per_atom: float
+    e_hull_ev: Optional[float] = None
+    relaxed: bool
+    crystal: CrystalStatePayload
+
+
+class PrototypeCandidates(BaseModel):
+    target_formula: str
+    n_sources: int
+    candidates: List[PrototypeCandidate]     # sorted by e_hull_ev (then energy) when available
+    method: str
