@@ -1,0 +1,27 @@
+# Mirror of backend/pyproject.toml ([project].dependencies + [project.optional-dependencies].dev).
+# Keep in sync with pyproject.toml. Versions in comments are the ones verified in backend/.venv.
+#
+# torch: install the CUDA build first if you want GPU MACE, e.g.
+#   uv pip install --python .venv/Scripts/python.exe torch==2.6.0 --index-url https://download.pytorch.org/whl/cu124
+
+# runtime
+fastapi              # 0.162.5
+uvicorn[standard]    # 0.54.0
+websockets           # 17.4
+pydantic>=2.0        # 2.14.3
+numpy                # 2.4.6
+scipy                # used directly by app/core/fallback_calculator.py
+ase                  # 3.29.0
+pymatgen             # 2026.10.24
+spglib               # 2.8.0
+phonopy              # 4.10.0
+seekpath             # 2.2.2
+pyxtal               # 1.1.5 (Wyckoff tables for app/core/flow_generator.py)
+torch                # 2.6.0+cu124
+mace-torch           # 0.3.17
+mp-api               # 0.46.5
+
+# dev
+pytest               # 9.2.0
+pytest-asyncio       # 1.4.1.post1
+httpx                # 0.28.1

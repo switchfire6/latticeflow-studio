@@ -1,0 +1,52 @@
+# LatticeFlow Studio: backend (FastAPI + MACE) and frontend (Vite dev server).
+#   docker compose up --build        -> open http://localhost:5173
+# The frontend shares the backend's network namespace, so the Vite proxy's default
+# target (127.0.0.1:8000) reaches uvicorn with no extra configuration.
+# GPU: build the backend with TORCH_INDEX=https://download.pytorch.org/whl/cu124 and
+# uncomment the `deploy` block (needs the NVIDIA Container Toolkit).
+
+services:
+  backend:
+    build:
+      context: ./backend
+      args:
+        TORCH_INDEX: ${TORCH_INDEX:-https://download.pytorch.org/whl/cpu}
+    env_file:
+      - path: .env
+        required: false
+    environment:
+      LATTICEFLOW_CORS_ORIGINS: ${LATTICEFLOW_CORS_ORIGINS:-http://localhost:5173,http://127.0.0.1:5173}
+    ports:
+      - "8000:8000"   # REST + WebSocket
+      - "5173:5173"   # published here because the frontend joins this network namespace
+    volumes:
+      - model-cache:/root/.cache   # MACE checkpoint + hull reference cache survive rebuilds
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/api/health')"]
+      interval: 10s
+      timeout: 5s
+      retries: 30
+      start_period: 60s
+    # deploy:
+    #   resources:
+    #     reservations:
+    #       devices:
+    #         - driver: nvidia
+    #           count: 1
+    #           capabilities: [gpu]
+
+  frontend:
+    image: node:24-alpine
+    working_dir: /app
+    command: sh -c "npm ci && npm run dev -- --host 0.0.0.0"
+    network_mode: "service:backend"
+    volumes:
+      - ./frontend:/app
+      - frontend-node-modules:/app/node_modules
+    depends_on:
+      backend:
+        condition: service_healthy
+
+volumes:
+  model-cache:
+  frontend-node-modules:

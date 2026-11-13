@@ -1,0 +1,34 @@
+[project]
+name = "latticeflow-studio-backend"
+version = "0.1.0"
+description = "LatticeFlow Studio backend: uMLIP physics core, flow generator, phonon engine, streaming API"
+requires-python = ">=3.11"
+dependencies = [
+    "fastapi",
+    "uvicorn[standard]",
+    "websockets",
+    "pydantic>=2.0",
+    "numpy",
+    "scipy",
+    "ase",
+    "pymatgen",
+    "spglib",
+    "phonopy",
+    "seekpath",
+    "pyxtal",
+    "torch",
+    "mace-torch",
+    "mp-api",
+]
+
+[project.optional-dependencies]
+dev = ["pytest", "pytest-asyncio", "httpx"]
+
+[tool.pytest.ini_options]
+pythonpath = ["."]
+testpaths = ["tests"]
+asyncio_mode = "auto"
+asyncio_default_fixture_loop_scope = "function"
+markers = [
+    "requires_mace: needs the real MACE-MP-0 checkpoint; skipped when only the fallback calculator is available",
+]

@@ -1,0 +1,80 @@
+@import "tailwindcss";
+
+@theme {
+  --font-sans: "Inter", "Segoe UI Variable", "Segoe UI", system-ui, -apple-system, sans-serif;
+  --font-mono: "JetBrains Mono", "Cascadia Mono", "SF Mono", ui-monospace, Consolas, monospace;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+  margin: 0;
+  background: #07090e;
+  color: #e2e8f0;
+  overflow: hidden;
+  -webkit-font-smoothing: antialiased;
+}
+
+select option {
+  background: #0b1120;
+}
+
+/* range sliders */
+.lf-range {
+  -webkit-appearance: none;
+  appearance: none;
+  height: 4px;
+  border-radius: 9999px;
+  background: linear-gradient(90deg, rgba(34, 211, 238, 0.45), rgba(148, 163, 184, 0.15));
+  outline: none;
+}
+.lf-range::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  width: 13px;
+  height: 13px;
+  border-radius: 9999px;
+  background: #e0f7ff;
+  border: 2px solid #22d3ee;
+  box-shadow: 0 0 10px rgba(34, 211, 238, 0.6);
+  cursor: pointer;
+}
+.lf-range::-moz-range-thumb {
+  width: 11px;
+  height: 11px;
+  border-radius: 9999px;
+  background: #e0f7ff;
+  border: 2px solid #22d3ee;
+  cursor: pointer;
+}
+.lf-range:disabled::-webkit-slider-thumb {
+  border-color: #475569;
+  box-shadow: none;
+}
+
+@keyframes lf-pulse-red {
+  0%,
+  100% {
+    box-shadow: 0 0 6px rgba(255, 42, 84, 0.35);
+    border-color: rgba(255, 42, 84, 0.45);
+  }
+  50% {
+    box-shadow: 0 0 18px rgba(255, 42, 84, 0.85);
+    border-color: rgba(255, 42, 84, 0.95);
+  }
+}
+.lf-pulse-red {
+  animation: lf-pulse-red 1.4s ease-in-out infinite;
+}
+
+@keyframes lf-indeterminate {
+  0% {
+    transform: translateX(-100%);
+  }
+  100% {
+    transform: translateX(300%);
+  }
+}
+.lf-indeterminate {
+  animation: lf-indeterminate 1.2s ease-in-out infinite;
+}
