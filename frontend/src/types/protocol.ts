@@ -192,6 +192,14 @@ export interface ClientCommandMap {
   COMPUTE_ELASTIC_TENSOR: ComputeElasticTensorPayload;
   EXPORT_PHONON_DATA: Record<string, never>;
   SET_MODEL: SetModelPayload;
+  // Phase C1
+  REQUEST_LOCAL_ANALYSIS: RequestLocalAnalysisPayload;
+  MAKE_SUPERCELL: MakeSupercellPayload;
+  ADD_ATOM: AddAtomPayload;
+  COMPUTE_FORMATION_ENERGY: ComputeFormationEnergyPayload;
+  SUBSTITUTE_FRACTION: SubstituteFractionPayload;
+  START_MD: StartMDPayload;
+  COMMITTEE_EVALUATE: CommitteeEvaluatePayload;
 }
 export type ClientCommand = keyof ClientCommandMap;
 
@@ -308,6 +316,8 @@ export interface HistoryState {
   position: number;
   length: number;
   label: string;
+  /** Phase C1: whole history, oldest first. */
+  entries?: HistoryEntryInfo[] | null;
 }
 
 export type ErrorCode =
@@ -425,6 +435,13 @@ export interface ServerEventMap {
   ELASTIC_TENSOR_RESULT: ElasticTensorResult;
   PHONON_EXPORT: PhononExport;
   MODEL_CHANGED: ModelChanged;
+  // Phase C1
+  LOCAL_ANALYSIS_DATA: LocalAnalysisData;
+  FORMATION_ENERGY_RESULT: FormationEnergyResult;
+  SUBSTITUTION_RESULT: SubstitutionResult;
+  MD_FRAME: MDFrame;
+  MD_COMPLETE: MDComplete;
+  COMMITTEE_RESULT: CommitteeResult;
 }
 export type ServerEvent = keyof ServerEventMap;
 
@@ -563,4 +580,178 @@ export interface MPSearchResponse {
 export interface MPStructureResponse {
   entry: MPEntry;
   cif: string;
+}
+
+// --------------------------------------------------------------------------- //
+// Phase C1 (IMPROVEMENT_SUGGESTIONS.md §5.7–5.10, §6.2)
+// --------------------------------------------------------------------------- //
+export interface HistoryEntryInfo {
+  position: number;
+  label: string;
+  formula: string;
+  n_atoms: number;
+  energy_per_atom: number;
+  spacegroup_symbol: string;
+}
+
+export interface RequestLocalAnalysisPayload {
+  include_partial_rdf?: boolean; // default true
+}
+/** L' = M L, rows = new lattice vectors in units of the old; det > 0. */
+export interface MakeSupercellPayload {
+  matrix: number[][];
+}
+export interface AddAtomPayload {
+  element: string;
+  frac_coords: [number, number, number];
+}
+/** Formation energy of the active (defect) structure vs the history entry `bulk_position`. */
+export interface ComputeFormationEnergyPayload {
+  bulk_position: number;
+}
+export interface SubstituteFractionPayload {
+  from_element: string;
+  to_element: string;
+  fraction: number; // (0, 1]
+  n_candidates?: number; // default 12
+  seed?: number | null;
+}
+export interface StartMDPayload {
+  temperature_k?: number; // default 300
+  ensemble?: "NVE" | "NVT" | "NPT"; // default NVT
+  timestep_fs?: number; // default 1
+  n_steps?: number; // default 2000
+  friction_per_fs?: number; // default 0.01
+  pressure_gpa?: number; // NPT only
+  frame_interval?: number; // default 10
+  seed?: number | null;
+}
+export interface CommitteeEvaluatePayload {
+  model_ids: string[]; // 2–4
+  relax?: boolean; // default true
+  dispersion?: boolean;
+}
+
+export interface NeighborInfo {
+  index: number;
+  element: string;
+  distance: number;
+  image_offset: [number, number, number];
+}
+export interface SiteEnvironment {
+  index: number;
+  element: string;
+  coordination_number: number;
+  neighbors: NeighborInfo[];
+  oxidation_state: number | null;
+  bond_valence_sum: number | null;
+}
+export interface Polyhedron {
+  center_index: number;
+  center_element: string;
+  ligand_indices: number[];
+  ligand_image_offsets: [number, number, number][];
+  shape: string; // "octahedron" | "tetrahedron" | "square-planar" | "trigonal-planar" | "other"
+  mean_bond_length: number;
+  bond_length_distortion: number;
+  quadratic_elongation: number | null;
+}
+export interface OctahedralTilts {
+  tilt_angles_deg: [number, number, number];
+  phases: ("0" | "+" | "-")[];
+  glazer: string | null; // e.g. "a0a0c-"
+  pseudo_cubic_axes: number[][];
+  method: string;
+}
+export interface LocalAnalysisData {
+  rdf_r: number[];
+  partial_rdf: Record<string, number[]> | null; // "A-B" -> g_AB(r)
+  sites: SiteEnvironment[];
+  /** Aligned with the active payload's bonds: bond-valence ideal length (null if unknown). */
+  bond_ideal_lengths: (number | null)[] | null;
+  global_instability_index: number | null;
+  polyhedra: Polyhedron[];
+  octahedral_tilts: OctahedralTilts | null;
+  method: string;
+}
+export interface FormationEnergyResult {
+  defect_label: string;
+  delta_n: Record<string, number>;
+  e_defect_ev: number;
+  e_bulk_ev: number;
+  chemical_potentials: Record<string, Record<string, number>>; // limit -> element -> μ
+  formation_energies_ev: Record<string, number>; // limit -> E_f
+  min_image_distance: number;
+  warnings: string[];
+  method: string;
+}
+export interface SubstitutionResult {
+  from_element: string;
+  to_element: string;
+  n_substituted: number;
+  n_tried: number;
+  energies_per_atom: number[];
+  chosen_energy_per_atom: number;
+  method: string;
+}
+export interface MDFrame {
+  step: number;
+  time_ps: number;
+  temperature_k: number;
+  potential_energy_ev: number;
+  kinetic_energy_ev: number;
+  pressure_gpa: number | null;
+  volume: number;
+  msd_by_element: Record<string, number>;
+  crystal: CrystalStatePayload;
+}
+export interface MDComplete {
+  n_steps: number;
+  time_ps: number;
+  mean_temperature_k: number;
+  mean_pressure_gpa: number | null;
+  mean_volume: number;
+  times_ps: number[];
+  msd_by_element: Record<string, number[]>;
+  diffusion_coefficients_cm2_s: Record<string, number | null>;
+  final_crystal: CrystalStatePayload;
+  method: string;
+}
+export interface CommitteeEntry {
+  model_id: string;
+  backend_name: string;
+  pressure_gpa: number;
+  max_force: number;
+  relaxed_volume_per_atom: number | null;
+  relaxed_lattice_abc: [number, number, number] | null;
+  relaxed_spacegroup: string | null;
+  relaxed_energy_per_atom: number | null; // not comparable across models
+}
+export interface CommitteeResult {
+  entries: CommitteeEntry[];
+  spread: Record<string, number>;
+  method: string;
+}
+
+// REST: POST /api/ordering
+export interface OrderingRequest {
+  cif: string;
+  max_atoms?: number; // default 64
+  n_candidates?: number; // default 8
+  model_id?: string | null;
+  dispersion?: boolean;
+}
+export interface OrderingCandidate {
+  cif: string;
+  formula: string;
+  n_atoms: number;
+  spacegroup_symbol: string;
+  energy_per_atom: number;
+  relative_energy_mev_per_atom: number;
+}
+export interface OrderingResponse {
+  disordered_formula: string;
+  n_enumerated: number;
+  candidates: OrderingCandidate[];
+  method: string;
 }

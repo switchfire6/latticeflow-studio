@@ -39,6 +39,14 @@ class ClientCommand(str, Enum):
     COMPUTE_ELASTIC_TENSOR = "COMPUTE_ELASTIC_TENSOR"       # streaming (PROGRESS events)
     EXPORT_PHONON_DATA = "EXPORT_PHONON_DATA"               # instant, needs a valid phonon analysis
     SET_MODEL = "SET_MODEL"                                 # streaming (load / download), state-changing
+    # Phase C1
+    REQUEST_LOCAL_ANALYSIS = "REQUEST_LOCAL_ANALYSIS"       # instant
+    MAKE_SUPERCELL = "MAKE_SUPERCELL"                       # instant, state-changing
+    ADD_ATOM = "ADD_ATOM"                                   # instant, state-changing
+    COMPUTE_FORMATION_ENERGY = "COMPUTE_FORMATION_ENERGY"   # streaming (may fetch + relax hull references)
+    SUBSTITUTE_FRACTION = "SUBSTITUTE_FRACTION"             # streaming, state-changing
+    START_MD = "START_MD"                                   # streaming, state-changing
+    COMMITTEE_EVALUATE = "COMMITTEE_EVALUATE"               # streaming, not state-changing
 
 
 class ServerEvent(str, Enum):
@@ -60,6 +68,13 @@ class ServerEvent(str, Enum):
     ELASTIC_TENSOR_RESULT = "ELASTIC_TENSOR_RESULT"
     PHONON_EXPORT = "PHONON_EXPORT"
     MODEL_CHANGED = "MODEL_CHANGED"
+    # Phase C1
+    LOCAL_ANALYSIS_DATA = "LOCAL_ANALYSIS_DATA"
+    FORMATION_ENERGY_RESULT = "FORMATION_ENERGY_RESULT"
+    SUBSTITUTION_RESULT = "SUBSTITUTION_RESULT"
+    MD_FRAME = "MD_FRAME"
+    MD_COMPLETE = "MD_COMPLETE"
+    COMMITTEE_RESULT = "COMMITTEE_RESULT"
 
 
 class Envelope(BaseModel):
@@ -394,6 +409,17 @@ class HistoryState(BaseModel):
     position: int                            # index of the current entry (0-based)
     length: int                              # number of entries (bounded by HISTORY_LIMIT = 50)
     label: str                               # what produced the current entry, e.g. "Relaxation (converged)"
+    # Phase C1: the whole history (oldest first), so the client can pick e.g. a bulk reference.
+    entries: Optional[List["HistoryEntryInfo"]] = None
+
+
+class HistoryEntryInfo(BaseModel):
+    position: int
+    label: str
+    formula: str
+    n_atoms: int
+    energy_per_atom: float                   # with the model that produced the stored payload
+    spacegroup_symbol: str
 
 
 class ErrorCode(str, Enum):
@@ -433,3 +459,192 @@ F_TOL_THZ = 0.05
 
 # Resolve the forward reference PhononAnalysisComplete -> GammaModeIrrep (Phase B).
 PhononAnalysisComplete.model_rebuild()
+
+
+# =========================================================================== #
+# Phase C1 (IMPROVEMENT_SUGGESTIONS.md §5.7-5.10, §6.2)
+# =========================================================================== #
+# ---- commands ---------------------------------------------------------------
+class RequestLocalAnalysisPayload(BaseModel):
+    """Local structure of the active structure -> LOCAL_ANALYSIS_DATA (instant, cancels nothing)."""
+
+    include_partial_rdf: bool = True
+
+
+class MakeSupercellPayload(BaseModel):
+    """Replace the active structure by L' = M L (M integer, det(M) > 0). SINGLE_POINT_UPDATE + HISTORY_STATE
+    (label "Make supercell <n1>x<n2>x<n3>" or "Make supercell [[...]]"). STRUCTURE_TOO_LARGE above MAX_ATOMS."""
+
+    matrix: List[List[int]] = Field(min_length=3, max_length=3)   # rows: new lattice vectors in units of the old
+
+
+class AddAtomPayload(BaseModel):
+    """Insert an atom (interstitial / adsorbate). SINGLE_POINT_UPDATE + HISTORY_STATE ("Add <El> at (u, v, w)").
+    INVALID_OPERATION if it lands closer than 0.5 A to an existing atom (any periodic image)."""
+
+    element: str
+    frac_coords: List[float] = Field(min_length=3, max_length=3)
+
+
+class ComputeFormationEnergyPayload(BaseModel):
+    """Neutral point-defect formation energy of the ACTIVE structure (the defect cell) relative to the
+    bulk history entry at `bulk_position` (same lattice up to relaxation; the atoms differ by vacancies,
+    substitutions or interstitials). Chemical potentials come from the uMLIP-relaxed MP reference phases
+    of the chemical system of the bulk plus any added or removed elements (same pipeline and cache as the
+    hull; needs MP_API_KEY unless cached). Terminal: FORMATION_ENERGY_RESULT. PROGRESS while references relax."""
+
+    bulk_position: int = Field(ge=0)
+
+
+class SubstituteFractionPayload(BaseModel):
+    """Replace round(fraction * n_from) atoms of `from_element` by `to_element`, trying up to n_candidates
+    symmetry-distinct configurations (random if too many), keep the lowest uMLIP energy (single points).
+    Terminal: SUBSTITUTION_RESULT, then SINGLE_POINT_UPDATE + HISTORY_STATE ("Substitute <n> <A> -> <B>")."""
+
+    from_element: str
+    to_element: str
+    fraction: float = Field(gt=0, le=1)
+    n_candidates: int = Field(default=12, ge=1, le=100)
+    seed: Optional[int] = None
+
+
+class StartMDPayload(BaseModel):
+    """Molecular dynamics with the session engine. Streams MD_FRAME every frame_interval steps; terminal
+    MD_COMPLETE (or STREAM_STOPPED). The structure of the last frame becomes active and is pushed to the
+    history ("MD <T> K <ensemble> (<t> ps)", or "... (stopped)")."""
+
+    temperature_k: float = Field(default=300.0, gt=0, le=5000)
+    ensemble: Literal["NVE", "NVT", "NPT"] = "NVT"        # NVT: Langevin; NPT: Langevin + isotropic barostat
+    timestep_fs: float = Field(default=1.0, gt=0, le=5)
+    n_steps: int = Field(default=2000, ge=1, le=200000)
+    friction_per_fs: float = Field(default=0.01, gt=0, le=1)   # Langevin friction
+    pressure_gpa: float = 0.0                               # NPT only
+    frame_interval: int = Field(default=10, ge=1, le=1000)
+    seed: Optional[int] = None                              # Maxwell-Boltzmann velocities + thermostat noise
+
+
+class CommitteeEvaluatePayload(BaseModel):
+    """Evaluate the active structure with several models (not state-changing). Terminal COMMITTEE_RESULT;
+    PROGRESS per model (loading may download a checkpoint)."""
+
+    model_ids: List[str] = Field(min_length=2, max_length=4)
+    relax: bool = True                                      # also relax (positions + cell, fmax 0.02) per model
+    dispersion: bool = False
+
+
+# ---- events -----------------------------------------------------------------
+class NeighborInfo(BaseModel):
+    index: int
+    element: str
+    distance: float
+    image_offset: List[int]
+
+
+class SiteEnvironment(BaseModel):
+    index: int
+    element: str
+    coordination_number: int
+    neighbors: List[NeighborInfo]
+    oxidation_state: Optional[float] = None
+    bond_valence_sum: Optional[float] = None
+
+
+class Polyhedron(BaseModel):
+    center_index: int
+    center_element: str
+    ligand_indices: List[int]
+    ligand_image_offsets: List[List[int]]   # periodic image of each ligand relative to the centre (as in BondEdge)
+    shape: str                              # "octahedron" | "tetrahedron" | "square-planar" | "trigonal-planar" | "other"
+    mean_bond_length: float
+    bond_length_distortion: float           # (1/n) sum |l_i - l_mean| / l_mean
+    quadratic_elongation: Optional[float] = None   # octahedra / tetrahedra (Robinson et al.)
+
+
+class OctahedralTilts(BaseModel):
+    """Perovskite-like corner-sharing BX6 networks only (None otherwise)."""
+
+    tilt_angles_deg: List[float]            # rotation magnitudes about the pseudo-cubic a, b, c axes
+    phases: List[str]                       # per axis "0" | "+" (in-phase) | "-" (anti-phase)
+    glazer: Optional[str]                   # e.g. "a0a0c-" (None if not determinable)
+    pseudo_cubic_axes: List[List[float]]    # unit vectors used as a, b, c
+    method: str
+
+
+class LocalAnalysisData(BaseModel):
+    rdf_r: List[float]                                  # same grid as CrystalStatePayload.rdf_r
+    partial_rdf: Optional[Dict[str, List[float]]] = None   # "A-B" (alphabetical) -> g_AB(r), normalised so g -> 1
+    sites: List[SiteEnvironment]
+    bond_ideal_lengths: Optional[List[Optional[float]]] = None
+    #   aligned with the ACTIVE payload bonds: bond-valence ideal length r0 - b ln(V/CN) (None if unknown);
+    #   the frontend colours bonds by (length - ideal) / ideal instead of the covalent-radius strain_ratio
+    global_instability_index: Optional[float] = None    # sqrt(mean (BVS - |oxidation state|)^2), v.u.
+    polyhedra: List[Polyhedron]
+    octahedral_tilts: Optional[OctahedralTilts] = None
+    method: str
+
+
+class FormationEnergyResult(BaseModel):
+    defect_label: str                       # e.g. "V_O", "Na_Li", "Li_i", or a combination "V_O + V_Sr"
+    delta_n: Dict[str, int]                 # n_defect - n_bulk per element (negative = removed)
+    e_defect_ev: float                      # total energy of the defect cell (as given)
+    e_bulk_ev: float                        # total energy of the bulk entry (re-evaluated with the session model)
+    chemical_potentials: Dict[str, Dict[str, float]]   # limit name -> element -> mu (eV/atom)
+    formation_energies_ev: Dict[str, float]            # limit name -> E_f = E_def - E_bulk - sum dn_i mu_i
+    min_image_distance: float               # shortest defect-defect periodic distance (A)
+    warnings: List[str]                     # e.g. cell too small, defect cell unrelaxed, bulk under pressure
+    method: str
+
+
+class SubstitutionResult(BaseModel):
+    from_element: str
+    to_element: str
+    n_substituted: int
+    n_tried: int
+    energies_per_atom: List[float]          # of all tried configurations, ascending
+    chosen_energy_per_atom: float
+    method: str
+
+
+class MDFrame(BaseModel):
+    step: int
+    time_ps: float
+    temperature_k: float                    # instantaneous kinetic temperature
+    potential_energy_ev: float              # total
+    kinetic_energy_ev: float                # total
+    pressure_gpa: Optional[float]           # incl. kinetic contribution
+    volume: float
+    msd_by_element: Dict[str, float]        # A^2, from unwrapped positions relative to step 0
+    crystal: CrystalStatePayload            # wrapped, fast bonds
+
+
+class MDComplete(BaseModel):
+    n_steps: int
+    time_ps: float
+    mean_temperature_k: float
+    mean_pressure_gpa: Optional[float]
+    mean_volume: float
+    times_ps: List[float]                   # MSD sampling times
+    msd_by_element: Dict[str, List[float]]
+    diffusion_coefficients_cm2_s: Dict[str, Optional[float]]   # slope/6 over the last half; None if no linear regime
+    final_crystal: CrystalStatePayload
+    method: str
+
+
+class CommitteeEntry(BaseModel):
+    model_id: str
+    backend_name: str
+    pressure_gpa: float                     # of the structure as given
+    max_force: float
+    relaxed_volume_per_atom: Optional[float] = None
+    relaxed_lattice_abc: Optional[List[float]] = None
+    relaxed_spacegroup: Optional[str] = None
+    relaxed_energy_per_atom: Optional[float] = None   # NOT comparable across models (different references)
+
+
+class CommitteeResult(BaseModel):
+    entries: List[CommitteeEntry]
+    spread: Dict[str, float]                # e.g. "pressure_gpa", "max_force", "volume_percent" (max - min)
+    method: str
+
+
+HistoryState.model_rebuild()

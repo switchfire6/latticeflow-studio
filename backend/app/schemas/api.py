@@ -152,3 +152,32 @@ class MPStructureResponse(BaseModel):
 
     entry: MPEntry
     cif: str
+
+
+# --------------------------------------------------------------------------- #
+# Phase C1 (IMPROVEMENT_SUGGESTIONS.md §5.10): ordering of disordered structures
+# --------------------------------------------------------------------------- #
+class OrderingRequest(BaseModel):
+    """POST /api/ordering: enumerate ordered approximants of a disordered CIF, ranked by uMLIP energy."""
+
+    cif: str = Field(min_length=1)
+    max_atoms: int = Field(default=64, ge=1, le=128)      # largest ordered cell considered
+    n_candidates: int = Field(default=8, ge=1, le=50)     # returned (lowest energy first)
+    model_id: Optional[str] = None                        # session model (None = process default)
+    dispersion: bool = False
+
+
+class OrderingCandidate(BaseModel):
+    cif: str                                              # ordered structure, load with LOAD_STRUCTURE {cif}
+    formula: str
+    n_atoms: int
+    spacegroup_symbol: str
+    energy_per_atom: float                                # uMLIP single point (not relaxed)
+    relative_energy_mev_per_atom: float                   # vs the lowest candidate
+
+
+class OrderingResponse(BaseModel):
+    disordered_formula: str
+    n_enumerated: int                                     # configurations generated before ranking
+    candidates: List[OrderingCandidate]
+    method: str
