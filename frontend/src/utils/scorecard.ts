@@ -111,13 +111,13 @@ export function computeScorecard(i: ScorecardInput): ScoreCheck[] {
       id: "dynamic",
       title: "Dynamically stable",
       state: "running",
-      value: i.streams.some((s) => s.command === "CHECK_PHONON_CONVERGENCE") ? "checking convergence…" : "shake-test…",
+      value: i.streams.some((s) => s.command === "CHECK_PHONON_CONVERGENCE") ? "checking convergence…" : "computing phonons…",
       detail: ps ? supercellText(ps.supercellDim, ps.minImageDistance) : null,
       warning: null,
       prerequisite: null,
     };
   } else if (!ps) {
-    dynamic = { id: "dynamic", title: "Dynamically stable", state: "notrun", value: "—", detail: "phonon shake-test", warning: null, prerequisite: prereq };
+    dynamic = { id: "dynamic", title: "Dynamically stable", state: "notrun", value: "—", detail: "finite-displacement phonons", warning: null, prerequisite: prereq };
   } else {
     const stale = ps.stateVersion !== i.stateVersion;
     const sc = supercellText(ps.supercellDim, ps.minImageDistance);

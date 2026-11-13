@@ -7,10 +7,11 @@ import { useMemo, useRef, useState } from "react";
 import type { DiffractionPeak } from "../../types/protocol";
 import { niceTicks } from "../../utils/bandChart";
 import { formatHkl, nearestPeak, type Profile } from "../../utils/diffraction";
-import { CHART_COLORS, CHART_FONT, scale, useCanvasChart } from "./useCanvasChart";
+import { SERIES_COLORS } from "../../utils/chartData";
+import { CHART_COLORS, CHART_FONT, ink, scale, useCanvasChart } from "./useCanvasChart";
 
 const M = { left: 38, right: 10, top: 10, bottom: 28 };
-export const EXPERIMENT_COLOR = "#f5a524";
+export const EXPERIMENT_COLOR: string = SERIES_COLORS[1];
 
 export interface DiffractionChartProps {
   peaks: readonly DiffractionPeak[];
@@ -88,9 +89,10 @@ export function DiffractionChart(p: DiffractionChartProps) {
         ctx.lineJoin = "round";
         ctx.stroke();
       };
-      if (p.experimental) line(p.experimental, EXPERIMENT_COLOR, 1.3);
+      if (p.experimental) line(p.experimental, ink(EXPERIMENT_COLOR), 1.3);
       if (p.showSticks || !p.profile) {
-        ctx.strokeStyle = p.profile ? "rgba(125, 211, 252, 0.55)" : CHART_COLORS.sky;
+        ctx.strokeStyle = CHART_COLORS.sky;
+        ctx.globalAlpha = p.profile ? 0.55 : 1;
         ctx.lineWidth = p.profile ? 1 : 1.6;
         ctx.beginPath();
         for (const pk of p.peaks) {
@@ -99,11 +101,12 @@ export function DiffractionChart(p: DiffractionChartProps) {
           ctx.lineTo(px, y(pk.intensity));
         }
         ctx.stroke();
+        ctx.globalAlpha = 1;
       }
-      if (p.profile) line(p.profile, p.stale ? "rgba(148, 163, 184, 0.7)" : CHART_COLORS.cyan, 1.6);
+      if (p.profile) line(p.profile, p.stale ? CHART_COLORS.text : CHART_COLORS.sky, 1.6);
       if (hover) {
         const px = Math.round(x(hover.two_theta)) + 0.5;
-        ctx.strokeStyle = "rgba(226, 232, 240, 0.9)";
+        ctx.strokeStyle = CHART_COLORS.ink;
         ctx.lineWidth = 2;
         ctx.beginPath();
         ctx.moveTo(px, yB);
@@ -134,26 +137,26 @@ export function DiffractionChart(p: DiffractionChartProps) {
         onMouseLeave={() => setHover(null)}
       />
       {p.experimental && (
-        <div className="pointer-events-none absolute top-1 right-2 flex gap-2.5 font-mono text-[10px] text-slate-300">
+        <div className="pointer-events-none absolute top-1 right-2 flex gap-2.5 text-2xs text-fg-2">
           <span className="flex items-center gap-1">
-            <span className="h-[2px] w-3 rounded" style={{ background: CHART_COLORS.cyan }} /> simulated
+            <span className="h-[2px] w-3 rounded-ctl" style={{ background: CHART_COLORS.sky }} /> simulated
           </span>
           <span className="flex items-center gap-1">
-            <span className="h-[2px] w-3 rounded" style={{ background: EXPERIMENT_COLOR }} /> experiment
+            <span className="h-[2px] w-3 rounded-ctl" style={{ background: EXPERIMENT_COLOR }} /> experiment
           </span>
         </div>
       )}
       {hover && g && (
         <div
-          className="pointer-events-none absolute z-10 rounded-md border border-white/10 bg-slate-950/90 px-2 py-1 font-mono text-[10px] text-slate-200 shadow-lg"
+          className="pointer-events-none absolute z-10 rounded-ctl border border-line bg-surface px-2 py-1 font-mono text-2xs text-fg shadow-lg"
           style={{ top: M.top + 14, left: tipLeft > g.w / 2 ? undefined : tipLeft + 10, right: tipLeft > g.w / 2 ? g.w - tipLeft + 10 : undefined }}
           data-xrd-tooltip
         >
           <div>
             2θ {hover.two_theta.toFixed(3)}° · d {hover.d_spacing.toFixed(4)} Å
           </div>
-          <div className="text-slate-400">I {hover.intensity.toFixed(1)}</div>
-          <div className="text-cyan-200">{formatHkl(hover.hkls)}</div>
+          <div className="text-fg-3">I {hover.intensity.toFixed(1)}</div>
+          <div className="text-fg">{formatHkl(hover.hkls)}</div>
         </div>
       )}
     </div>

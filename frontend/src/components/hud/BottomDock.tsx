@@ -84,16 +84,16 @@ function RelaxationHeader() {
   const stream = useCrystalStore((s) => s.streams.find((x) => x.kind === "relaxation") ?? null);
   if (follow) {
     return (
-      <span className="truncate font-mono text-[10.5px] normal-case tracking-normal">
-        <span className="text-slate-400">follow {follow.qLabel ?? "q"} ν{follow.bandIndex}: </span>
-        <span className={follow.to ? "text-emerald-300" : "text-slate-300"}>{transitionText(follow)}</span>
-        <span className="text-slate-500"> · {followStatusText(follow)}</span>
+      <span className="truncate font-mono text-xs normal-case tracking-normal">
+        <span className="text-fg-3">follow {follow.qLabel ?? "q"} ν{follow.bandIndex}: </span>
+        <span className={follow.to ? "text-ok" : "text-fg-2"}>{transitionText(follow)}</span>
+        <span className="text-fg-4"> · {followStatusText(follow)}</span>
       </span>
     );
   }
   if (stream?.progress.step != null) {
     return (
-      <span className="font-mono text-[10.5px] normal-case tracking-normal text-slate-400">
+      <span className="font-mono text-xs normal-case tracking-normal text-fg-3">
         step {stream.progress.step} · max |F| {stream.progress.maxForce?.toFixed(3)} eV/Å
       </span>
     );
@@ -104,13 +104,13 @@ function RelaxationHeader() {
 function Pane({ pane, weight, children, onHide }: { pane: DockPane; weight: number; children: ReactNode; onHide(): void }) {
   const bodyRef = useRef<HTMLDivElement>(null);
   return (
-    <div className="flex min-w-0 flex-col rounded-lg border border-white/[0.06] bg-white/[0.015]" style={{ flex: `${weight} 1 0` }} data-pane={pane}>
+    <div className="flex min-w-0 flex-col rounded-panel border border-line bg-surface" style={{ flex: `${weight} 1 0` }} data-pane={pane}>
       <div className="flex h-7 shrink-0 items-center gap-2 px-2.5">
-        <span className="shrink-0 text-[10px] font-semibold tracking-[0.16em] text-slate-400 uppercase">{TITLES[pane]}</span>
+        <span className="shrink-0 text-xs font-semibold text-fg-2">{TITLES[pane]}</span>
         <span className="min-w-0 flex-1 truncate">{pane === "relaxation" && <RelaxationHeader />}</span>
         {MODEL_PANES.has(pane) && <FallbackTag />}
         <PaneExport pane={pane} bodyRef={bodyRef} />
-        <button type="button" title="Hide pane" className="text-slate-600 hover:text-slate-300" onClick={onHide}>
+        <button type="button" title="Hide pane" className="text-fg-5 hover:text-fg-2" onClick={onHide}>
           <X size={12} />
         </button>
       </div>
@@ -167,19 +167,19 @@ export function BottomDock() {
 
   return (
     <section
-      className="relative shrink-0 border-t border-white/[0.06] bg-slate-950/85 backdrop-blur-md"
+      className="relative shrink-0 border-t border-line bg-canvas"
       style={{ height: dock.open ? dock.height : 32 }}
       data-dock-open={dock.open}
     >
-      {dock.open && <div className="absolute -top-1 right-0 left-0 z-10 h-2 cursor-row-resize hover:bg-cyan-400/20" onPointerDown={startResize} title="Drag to resize" />}
+      {dock.open && <div className="absolute -top-1 right-0 left-0 z-10 h-2 cursor-row-resize hover:bg-hover" onPointerDown={startResize} title="Drag to resize" />}
       <div className="flex h-8 items-center gap-3 px-4">
         <button
           type="button"
           onClick={() => setDock({ open: !dock.open })}
-          className="flex items-center gap-2 text-[10px] font-semibold tracking-[0.18em] text-slate-400 uppercase hover:text-slate-200"
+          className="flex items-center gap-2 text-2xs font-semibold tracking-[0.06em] text-fg-3 uppercase hover:text-fg"
         >
           {dock.open ? <ChevronDown size={13} /> : <ChevronUp size={13} />}
-          Charts dock
+          Charts
         </button>
         <div className="flex gap-1">
           {DOCK_PANES.map((p) => {
@@ -195,8 +195,8 @@ export function BottomDock() {
                 title={onDemand ? `Open the ${TITLES[p].toLowerCase()} pane` : undefined}
                 onClick={() => (onDemand ? showPane(p) : toggleHidden(p))}
                 className={cx(
-                  "rounded px-1.5 py-0.5 font-mono text-[10px] transition-colors disabled:opacity-30",
-                  shown ? "bg-cyan-400/15 text-cyan-200" : "text-slate-500 hover:text-slate-300",
+                  "rounded-ctl px-2 py-0.5 text-xs transition-colors disabled:opacity-30",
+                  shown ? "bg-accent-soft text-accent-fg" : "text-fg-3 hover:bg-hover hover:text-fg",
                 )}
               >
                 {TOGGLE_LABELS[p]}
@@ -211,7 +211,7 @@ export function BottomDock() {
             <div key={p} className="flex min-w-0" style={{ flex: `${dock.weights[p]} 1 0` }}>
               {i > 0 && (
                 <div
-                  className="mx-0.5 w-1.5 shrink-0 cursor-col-resize rounded hover:bg-cyan-400/25"
+                  className="mx-0.5 w-1.5 shrink-0 cursor-col-resize rounded-ctl hover:bg-hover"
                   onPointerDown={(e) => startSplit(e, panes[i - 1]!, p)}
                   title="Drag to resize panes"
                 />
@@ -247,7 +247,7 @@ export function BottomDock() {
               </Pane>
             </div>
           ))}
-          {panes.length === 0 && <div className="grid flex-1 place-items-center text-[11px] text-slate-500">All panes hidden. Use the toggles above.</div>}
+          {panes.length === 0 && <div className="grid flex-1 place-items-center text-xs text-fg-4">All panes hidden. Use the toggles above.</div>}
         </div>
       )}
     </section>

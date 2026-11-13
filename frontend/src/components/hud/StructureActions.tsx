@@ -26,8 +26,8 @@ function GearButton({ open, onClick, title }: { open: boolean; onClick(): void; 
       aria-expanded={open}
       onClick={onClick}
       className={cx(
-        "grid w-8 shrink-0 place-items-center rounded-lg border border-white/10 bg-white/[0.03] text-slate-400 hover:border-cyan-400/40 hover:text-cyan-200",
-        open && "border-cyan-400/50 text-cyan-200",
+        "grid w-8 shrink-0 place-items-center rounded-ctl border border-line bg-raised text-fg-3 hover:border-line-strong hover:text-fg",
+        open && "border-accent/60 text-accent-fg",
       )}
     >
       <Settings2 size={13} />
@@ -37,9 +37,9 @@ function GearButton({ open, onClick, title }: { open: boolean; onClick(): void; 
 
 function CheckRow({ label, checked, onChange, title }: { label: string; checked: boolean; onChange(v: boolean): void; title?: string }) {
   return (
-    <label className="flex cursor-pointer items-center justify-between gap-2 text-[11px] text-slate-400" title={title}>
+    <label className="flex cursor-pointer items-center justify-between gap-2 text-xs text-fg-3" title={title}>
       <span>{label}</span>
-      <input type="checkbox" className="accent-cyan-400" checked={checked} onChange={(e) => onChange(e.target.checked)} />
+      <input type="checkbox" className="accent-accent" checked={checked} onChange={(e) => onChange(e.target.checked)} />
     </label>
   );
 }
@@ -48,7 +48,7 @@ export function RelaxSettingsPanel() {
   const r = useSettings((s) => s.relax);
   const set = useSettings((s) => s.setRelax);
   return (
-    <div className="space-y-1.5 rounded-lg border border-white/[0.06] bg-black/20 p-2" data-relax-settings>
+    <div className="space-y-1.5 rounded-ctl border border-line-soft bg-field p-2" data-relax-settings>
       <NumberField label="fmax" unit="eV/Å" value={r.fmax} min={0.0001} max={1} onCommit={(fmax) => set({ fmax })} title="Force convergence threshold" />
       <NumberField label="max steps" value={r.maxSteps} integer min={1} max={5000} onCommit={(maxSteps) => set({ maxSteps })} />
       <CheckRow label="relax cell" checked={r.relaxCell} onChange={(relaxCell) => set({ relaxCell })} title="Relax lattice vectors too (FrechetCellFilter)" />
@@ -73,11 +73,11 @@ export function RelaxSettingsPanel() {
         onCommit={(stressTolGpa) => set({ stressTolGpa })}
         title="Converged also needs max |σ_ij + P δ_ij| below this"
       />
-      <div className="flex items-center justify-between text-[11px] text-slate-400">
+      <div className="flex items-center justify-between text-xs text-fg-3">
         <span>optimizer</span>
         <Segmented<Optimizer> value={r.optimizer} options={OPTIMIZERS.map((o) => ({ value: o, label: o }))} onChange={(optimizer) => set({ optimizer })} />
       </div>
-      <button type="button" className="flex items-center gap-1 text-[10px] text-slate-500 hover:text-slate-300" onClick={() => useSettings.getState().resetRelax()}>
+      <button type="button" className="flex items-center gap-1 text-2xs text-fg-4 hover:text-fg-2" onClick={() => useSettings.getState().resetRelax()}>
         <RotateCcw size={10} /> defaults
       </button>
     </div>
@@ -97,8 +97,8 @@ export function PhononSettingsPanel() {
   // In primitive mode the server sizes the supercell of the primitive cell: the estimate here is for the displayed one.
   const estimate = p.supercell !== null || p.cellMode === "as_displayed";
   return (
-    <div className="space-y-1.5 rounded-lg border border-white/[0.06] bg-black/20 p-2" data-phonon-settings>
-      <div className="flex items-center justify-between text-[11px] text-slate-400" title="Textbook: phonons of the spglib primitive cell on the standard (seekpath) path, 3·N_prim branches; the animation still uses the displayed atoms. As displayed: the cell on screen (folded branches for conventional cells).">
+    <div className="space-y-1.5 rounded-ctl border border-line-soft bg-field p-2" data-phonon-settings>
+      <div className="flex items-center justify-between text-xs text-fg-3" title="Textbook: phonons of the spglib primitive cell on the standard (seekpath) path, 3·N_prim branches; the animation still uses the displayed atoms. As displayed: the cell on screen (folded branches for conventional cells).">
         <span>dispersion</span>
         <Segmented<PhononCellMode>
           value={p.cellMode ?? "primitive"}
@@ -109,7 +109,7 @@ export function PhononSettingsPanel() {
           onChange={(cellMode) => set({ cellMode })}
         />
       </div>
-      <div className="flex items-center justify-between text-[11px] text-slate-400">
+      <div className="flex items-center justify-between text-xs text-fg-3">
         <span>supercell</span>
         <Segmented
           value={p.supercell ? "manual" : "auto"}
@@ -138,7 +138,7 @@ export function PhononSettingsPanel() {
             aria-label={`supercell n${i + 1}`}
             disabled={!p.supercell}
             inputMode="numeric"
-            className="w-10 rounded border border-white/10 bg-slate-900/80 px-1 py-0.5 text-center font-mono text-[11px] text-slate-100 outline-none focus:border-cyan-400/50 disabled:opacity-60"
+            className="w-10 rounded-ctl border border-line bg-field px-1 py-0.5 text-center font-mono text-xs text-fg outline-none focus:border-accent disabled:opacity-60"
             value={dims[i]}
             onChange={(e) => {
               const v = Number.parseInt(e.target.value, 10);
@@ -149,7 +149,7 @@ export function PhononSettingsPanel() {
             }}
           />
         ))}
-        <span className="ml-1 font-mono text-[10px] text-slate-500" title={estimate ? undefined : "Estimate for the displayed cell; the server sizes the primitive-cell supercell"}>
+        <span className="ml-1 font-mono text-2xs text-fg-4" title={estimate ? undefined : "Estimate for the displayed cell; the server sizes the primitive-cell supercell"}>
           {estimate ? "" : "≈ "}
           {superAtoms} at
           {lengths && ` · ≥${Math.min(...lengths.map((L, i) => L * dims[i]!)).toFixed(1)} Å`}
@@ -157,14 +157,14 @@ export function PhononSettingsPanel() {
       </div>
       <NumberField label="displacement Δu" unit="Å" value={p.displacement} min={0.001} max={0.1} onCommit={(displacement) => set({ displacement })} />
       <CheckRow label="DOS + thermodynamics after each run" checked={p.autoDos} onChange={(autoDos) => set({ autoDos })} />
-      <button type="button" className="flex items-center gap-1 text-[10px] text-slate-500 hover:text-slate-300" onClick={() => useSettings.getState().resetPhonon()}>
+      <button type="button" className="flex items-center gap-1 text-2xs text-fg-4 hover:text-fg-2" onClick={() => useSettings.getState().resetPhonon()}>
         <RotateCcw size={10} /> defaults
       </button>
     </div>
   );
 }
 
-/** FIRE relax + phonon shake-test buttons with settings (sidebar and the selected-atom toolbar). */
+/** Relax + phonon buttons with settings (sidebar and the selected-atom toolbar). */
 export function StructureActions({ compact, layout = "stack" }: { compact?: boolean; layout?: "stack" | "bar" }) {
   const connected = useCrystalStore((s) => s.connection === "open");
   const relaxing = useCrystalStore((s) => s.streams.some((x) => x.kind === "relaxation"));
@@ -183,13 +183,13 @@ export function StructureActions({ compact, layout = "stack" }: { compact?: bool
       <div className="flex gap-1.5">
         <Button variant={relaxing ? "danger" : "ghost"} className="flex-1" disabled={!connected} onClick={() => (relaxing ? commands.stop() : commands.relax())}>
           {relaxing ? <Square size={12} /> : <Wind size={13} />}
-          {relaxing ? "Stop Relaxation" : `${relax.optimizer} Relax${relax.relaxCell ? " (cell)" : ""}`}
+          {relaxing ? "Stop relaxation" : `Relax (${relax.optimizer}${relax.relaxCell ? ", cell" : ""})`}
         </Button>
         <GearButton open={relaxOpen} onClick={() => setRelaxOpen((o) => !o)} title="Relaxation settings" />
       </div>
       {relaxOpen && <RelaxSettingsPanel />}
       {unconverged && !relaxing && (
-        <Button variant="ghost" className="border-amber-400/40 text-amber-200" disabled={!connected} onClick={() => commands.relax()} title={`Stopped at ${unconverged.steps} steps, max |F| = ${unconverged.maxForce.toFixed(3)} eV/Å`}>
+        <Button variant="ghost" className="border-warn/40 text-warn" disabled={!connected} onClick={() => commands.relax()} title={`Stopped at ${unconverged.steps} steps, max |F| = ${unconverged.maxForce.toFixed(3)} eV/Å`}>
           <Play size={12} /> Continue relaxation
         </Button>
       )}
@@ -198,17 +198,17 @@ export function StructureActions({ compact, layout = "stack" }: { compact?: bool
           variant={phononRunning ? "danger" : warning ? "warning" : "ghost"}
           className="flex-1"
           disabled={!connected || tooBig}
-          title={tooBig ? `The shake-test supports at most ${phononMaxAtoms} atoms per cell` : (warning ?? "Finite-displacement phonons (settings: gear)")}
+          title={tooBig ? `Phonons support at most ${phononMaxAtoms} atoms per cell` : (warning ?? "Finite-displacement phonons (settings: gear)")}
           onClick={() => (phononRunning ? commands.stop() : commands.runPhonons())}
         >
           {phononRunning ? <Square size={12} /> : <Waves size={13} />}
-          {phononRunning ? "Stop Shake-Test" : "Run Phonon Shake-Test"}
+          {phononRunning ? "Stop phonons" : "Run phonons"}
         </Button>
         <GearButton open={phononOpen} onClick={() => setPhononOpen((o) => !o)} title="Phonon settings" />
       </div>
       {phononOpen && <PhononSettingsPanel />}
       {warning && !compact && (
-        <p className={cx("text-[10.5px] leading-snug text-amber-300/80", layout === "bar" && "truncate")} title={warning} data-phonon-warning>
+        <p className={cx("text-xs leading-snug text-warn/80", layout === "bar" && "truncate")} title={warning} data-phonon-warning>
           {warning[0]!.toUpperCase() + warning.slice(1)}.
         </p>
       )}

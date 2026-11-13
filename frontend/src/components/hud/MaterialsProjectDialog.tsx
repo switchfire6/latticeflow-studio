@@ -66,13 +66,13 @@ export function MaterialsProjectDialog({ onClose }: { onClose(): void }) {
   };
 
   return createPortal(
-    <div className="fixed inset-0 z-[100] grid place-items-center bg-black/50 backdrop-blur-[2px]" onMouseDown={(e) => e.target === e.currentTarget && onClose()}>
-      <Panel className="flex max-h-[min(640px,calc(100vh-48px))] w-[640px] max-w-[calc(100vw-32px)] flex-col p-4">
+    <div className="fixed inset-0 z-[100] grid place-items-center bg-black/50" onMouseDown={(e) => e.target === e.currentTarget && onClose()}>
+      <Panel floating className="flex max-h-[min(640px,calc(100vh-48px))] w-[640px] max-w-[calc(100vw-32px)] flex-col p-4">
         <div className="mb-2 flex items-center justify-between">
-          <span className="flex items-center gap-1.5 text-[10px] font-semibold tracking-[0.18em] text-slate-400 uppercase">
-            <Database size={12} className="text-cyan-300" /> Load from Materials Project
+          <span className="flex items-center gap-1.5 text-2xs font-semibold tracking-[0.06em] text-fg-3 uppercase">
+            <Database size={12} className="text-fg-3" /> Load from Materials Project
           </span>
-          <button type="button" onClick={onClose} className="text-slate-500 hover:text-slate-200" aria-label="close">
+          <button type="button" onClick={onClose} className="text-fg-4 hover:text-fg" aria-label="close">
             <X size={14} />
           </button>
         </div>
@@ -96,12 +96,12 @@ export function MaterialsProjectDialog({ onClose }: { onClose(): void }) {
             {busy ? <Loader2 size={12} className="animate-spin" /> : <Search size={12} />} Search
           </Button>
         </form>
-        <div className="mt-1 font-mono text-[10px] text-slate-500">{q.trim() ? `searching by ${KIND_HINT[kind]}` : "polymorphs are listed by MP's E_hull (GGA/GGA+U), lowest first"}</div>
+        <div className="mt-1 text-2xs text-fg-4">{q.trim() ? `searching by ${KIND_HINT[kind]}` : "polymorphs are listed by MP's E_hull (GGA/GGA+U), lowest first"}</div>
         {err && (
           <div
             className={cx(
-              "mt-2 rounded-md border px-2 py-1.5 text-[11px] leading-snug",
-              err.tone === "amber" ? "border-amber-400/40 bg-amber-400/10 text-amber-200" : err.tone === "red" ? "border-rose-500/40 bg-rose-500/10 text-rose-200" : "border-white/10 bg-white/[0.03] text-slate-300",
+              "mt-2 rounded-ctl border px-2 py-1.5 text-xs leading-snug",
+              err.tone === "amber" ? "border-warn/40 bg-warn/10 text-warn" : err.tone === "red" ? "border-bad/40 bg-bad/10 text-bad" : "border-line bg-raised text-fg-2",
             )}
             data-mp-error
           >
@@ -109,9 +109,9 @@ export function MaterialsProjectDialog({ onClose }: { onClose(): void }) {
           </div>
         )}
         {results && results.length > 0 && (
-          <div className="mt-2 min-h-0 flex-1 overflow-y-auto rounded-lg border border-white/[0.06]">
-            <table className="w-full font-mono text-[11px] tabular-nums" data-mp-results>
-              <thead className="sticky top-0 bg-slate-950/95 text-[10px] text-slate-500">
+          <div className="mt-2 min-h-0 flex-1 overflow-y-auto rounded-ctl border border-line-soft">
+            <table className="w-full font-mono text-xs tabular-nums" data-mp-results>
+              <thead className="sticky top-0 bg-surface text-2xs text-fg-4">
                 <tr>
                   <th className="px-2 py-1 text-left font-normal">id</th>
                   <th className="px-2 text-left font-normal">formula</th>
@@ -124,13 +124,13 @@ export function MaterialsProjectDialog({ onClose }: { onClose(): void }) {
               </thead>
               <tbody>
                 {results.map((r) => (
-                  <tr key={r.material_id} className="border-t border-white/[0.04] text-slate-200 hover:bg-white/[0.03]">
-                    <td className="px-2 py-1 text-cyan-200">{r.material_id}</td>
+                  <tr key={r.material_id} className="border-t border-line-soft text-fg hover:bg-hover">
+                    <td className="px-2 py-1 text-fg">{r.material_id}</td>
                     <td className="px-2">
                       <FormulaText formula={r.formula} />
                     </td>
                     <td className="px-2">
-                      {r.spacegroup_symbol} <span className="text-slate-500">#{r.spacegroup_number}</span>
+                      {r.spacegroup_symbol} <span className="text-fg-4">#{r.spacegroup_number}</span>
                     </td>
                     <td className="px-2 text-right">{r.nsites}</td>
                     <td className="px-2 text-right">{r.energy_above_hull != null ? r.energy_above_hull.toFixed(3) : "—"}</td>
@@ -142,7 +142,7 @@ export function MaterialsProjectDialog({ onClose }: { onClose(): void }) {
                       </span>
                     </td>
                     <td className="px-2 text-right">
-                      <Button className="px-2 py-0.5 text-[10.5px]" disabled={!connected || loading !== null} onClick={() => void load(r.material_id)} title={r.nsites > maxAtoms ? `More than ${maxAtoms} sites: exceeds the studio atom limit` : r.nsites > phononMaxAtoms ? `More than ${phononMaxAtoms} sites: phonons will not run on this cell` : undefined}>
+                      <Button className="px-2 py-0.5 text-xs" disabled={!connected || loading !== null} onClick={() => void load(r.material_id)} title={r.nsites > maxAtoms ? `More than ${maxAtoms} sites: exceeds the studio atom limit` : r.nsites > phononMaxAtoms ? `More than ${phononMaxAtoms} sites: phonons will not run on this cell` : undefined}>
                         {loading === r.material_id ? <Loader2 size={11} className="animate-spin" /> : null} Load
                       </Button>
                     </td>

@@ -20,15 +20,15 @@ export function ProgressBar({ done, total, message }: { done?: number | null; to
   const frac = done != null && total ? Math.min(1, done / total) : null;
   return (
     <div className="w-full" data-progress>
-      <div className="mb-0.5 flex justify-between font-mono text-[10px] text-slate-400">
+      <div className="mb-0.5 flex justify-between font-mono text-2xs text-fg-3">
         <span className="truncate">{message || "working…"}</span>
         {frac !== null && <span className="tabular-nums">{done}/{total}</span>}
       </div>
-      <div className="h-1 overflow-hidden rounded-full bg-white/5">
+      <div className="h-1 overflow-hidden rounded-full bg-raised">
         {frac !== null ? (
-          <div className="h-full rounded-full bg-gradient-to-r from-cyan-400 to-sky-400 transition-[width]" style={{ width: `${Math.round(frac * 100)}%` }} />
+          <div className="h-full rounded-full bg-accent transition-[width]" style={{ width: `${Math.round(frac * 100)}%` }} />
         ) : (
-          <div className="lf-indeterminate h-full w-1/3 rounded-full bg-cyan-400/70" />
+          <div className="lf-indeterminate h-full w-1/3 rounded-full bg-accent" />
         )}
       </div>
     </div>
@@ -38,8 +38,8 @@ export function ProgressBar({ done, total, message }: { done?: number | null; to
 function Row({ label, value, title, tone }: { label: string; value: string; title?: string; tone?: "amber" | "green" | "red" }) {
   return (
     <div className="flex items-baseline justify-between gap-2" title={title}>
-      <span className="text-slate-500">{label}</span>
-      <span className={cx("tabular-nums", tone === "amber" ? "text-amber-300" : tone === "green" ? "text-emerald-300" : tone === "red" ? "text-rose-300" : "text-slate-100")}>{value}</span>
+      <span className="text-fg-4">{label}</span>
+      <span className={cx("tabular-nums", tone === "amber" ? "text-warn" : tone === "green" ? "text-ok" : tone === "red" ? "text-bad" : "text-fg")}>{value}</span>
     </div>
   );
 }
@@ -48,8 +48,8 @@ export function ElasticResultView({ r, stale }: { r: ElasticTensorResult; stale:
   const sum = elasticSummary(r);
   const maxAbs = Math.max(1, ...r.c_ij_gpa.flat().map((v) => Math.abs(v)));
   return (
-    <div className="flex h-full w-full min-w-0 gap-3 overflow-hidden font-mono text-[10.5px]" data-elastic-result>
-      <div className="flex w-[210px] shrink-0 flex-col gap-1 overflow-y-auto border-r border-white/[0.06] pr-3">
+    <div className="flex h-full w-full min-w-0 gap-3 overflow-hidden font-mono text-xs" data-elastic-result>
+      <div className="flex w-[210px] shrink-0 flex-col gap-1 overflow-y-auto border-r border-line-soft pr-3">
         <div className="flex flex-wrap items-center gap-1">
           {r.born_stable ? (
             <Badge tone="green" title="All six eigenvalues of C are positive (Born criteria)">
@@ -62,14 +62,14 @@ export function ElasticResultView({ r, stale }: { r: ElasticTensorResult; stale:
           )}
           <FallbackTag compact />
         </div>
-        {stale && <p className="text-amber-300/80">Structure or model changed since this fit; recompute.</p>}
+        {stale && <p className="text-warn/80">Structure or model changed since this fit; recompute.</p>}
         {sum.pressureWarning && (
-          <p className="flex gap-1 leading-snug text-amber-300" data-pressure-warning>
+          <p className="flex gap-1 leading-snug text-warn" data-pressure-warning>
             <AlertTriangle size={11} className="mt-px shrink-0" /> {sum.pressureWarning}
           </p>
         )}
         <table className="w-full text-right tabular-nums">
-          <thead className="text-slate-500">
+          <thead className="text-fg-4">
             <tr>
               <th className="text-left font-normal">GPa</th>
               <th className="font-normal">Voigt</th>
@@ -77,18 +77,18 @@ export function ElasticResultView({ r, stale }: { r: ElasticTensorResult; stale:
               <th className="font-normal">Hill</th>
             </tr>
           </thead>
-          <tbody className="text-slate-200">
+          <tbody className="text-fg">
             <tr>
-              <td className="text-left text-slate-500">K</td>
+              <td className="text-left text-fg-4">K</td>
               <td>{f(r.k_voigt_gpa)}</td>
               <td>{f(r.k_reuss_gpa)}</td>
-              <td className="text-slate-50">{f(r.k_vrh_gpa)}</td>
+              <td className="text-fg">{f(r.k_vrh_gpa)}</td>
             </tr>
             <tr>
-              <td className="text-left text-slate-500">G</td>
+              <td className="text-left text-fg-4">G</td>
               <td>{f(r.g_voigt_gpa)}</td>
               <td>{f(r.g_reuss_gpa)}</td>
-              <td className="text-slate-50">{f(r.g_vrh_gpa)}</td>
+              <td className="text-fg">{f(r.g_vrh_gpa)}</td>
             </tr>
           </tbody>
         </table>
@@ -104,14 +104,14 @@ export function ElasticResultView({ r, stale }: { r: ElasticTensorResult; stale:
         <Row label="Θ_D" value={r.debye_temperature_k != null ? `${r.debye_temperature_k.toFixed(0)} K` : "—"} title="Debye temperature from the averaged sound velocity" />
         <Row label="P_ref" value={`${r.reference_pressure_gpa >= 0 ? "+" : "−"}${Math.abs(r.reference_pressure_gpa).toFixed(2)} GPa`} tone={sum.pressureWarning ? "amber" : undefined} />
         <Row label="fit residual" value={`${f(r.fit_residual_gpa, 2)} GPa`} />
-        <p className="mt-1 leading-snug text-slate-500">
+        <p className="mt-1 leading-snug text-fg-4">
           {r.relaxed_ions ? "relaxed-ion" : "clamped-ion"} · ±{(r.max_strain * 100).toFixed(1)} % · {r.method}
         </p>
       </div>
       <div className="flex min-w-0 flex-1 flex-col gap-2 overflow-auto">
         <table className="tabular-nums" data-cij>
           <thead>
-            <tr className="text-slate-500">
+            <tr className="text-fg-4">
               <th className="px-1 font-normal">C_ij</th>
               {[1, 2, 3, 4, 5, 6].map((j) => (
                 <th key={j} className="px-1.5 text-right font-normal">
@@ -123,14 +123,14 @@ export function ElasticResultView({ r, stale }: { r: ElasticTensorResult; stale:
           <tbody>
             {r.c_ij_gpa.map((row, i) => (
               <tr key={i}>
-                <td className="px-1 text-slate-500">{i + 1}</td>
+                <td className="px-1 text-fg-4">{i + 1}</td>
                 {row.map((v, j) => {
                   const a = Math.min(1, Math.abs(v) / maxAbs);
                   return (
                     <td
                       key={j}
-                      className={cx("px-1.5 py-px text-right", Math.abs(v) < 0.5 ? "text-slate-600" : "text-slate-100")}
-                      style={{ background: Math.abs(v) >= 0.5 ? (v > 0 ? `rgba(34,211,238,${0.05 + 0.22 * a})` : `rgba(255,42,84,${0.08 + 0.25 * a})`) : undefined }}
+                      className={cx("px-1.5 py-px text-right", Math.abs(v) < 0.5 ? "text-fg-5" : "text-fg")}
+                      style={{ background: Math.abs(v) >= 0.5 ? (v > 0 ? `rgba(57,135,229,${0.06 + 0.24 * a})` : `rgba(217,89,38,${0.08 + 0.26 * a})`) : undefined }}
                     >
                       {v.toFixed(1)}
                     </td>
@@ -140,10 +140,10 @@ export function ElasticResultView({ r, stale }: { r: ElasticTensorResult; stale:
             ))}
           </tbody>
         </table>
-        <div className="text-slate-400">
+        <div className="text-fg-3">
           eigenvalues (GPa):{" "}
           {r.eigenvalues_gpa.map((e, i) => (
-            <span key={i} className={cx("mr-1.5", e <= 0 ? "text-rose-300" : "text-slate-200")}>
+            <span key={i} className={cx("mr-1.5", e <= 0 ? "text-bad" : "text-fg")}>
               {e.toFixed(1)}
             </span>
           ))}
@@ -157,11 +157,11 @@ export function ElasticSettingsRow({ compact }: { compact?: boolean }) {
   const e = useSettings((s) => s.elastic);
   const set = useSettings((s) => s.setElastic);
   return (
-    <div className={cx("flex flex-wrap items-center gap-x-3 gap-y-1", compact && "text-[10px]")} data-elastic-settings>
+    <div className={cx("flex flex-wrap items-center gap-x-3 gap-y-1", compact && "text-2xs")} data-elastic-settings>
       <div className="w-[180px]">
         <NumberField label="max strain" unit="%" value={+(e.maxStrain * 100).toFixed(2)} min={0.1} max={5} onCommit={(v) => set({ maxStrain: v / 100 })} title="Largest applied strain (± in each of the six independent directions)" />
       </div>
-      <span className="flex items-center gap-1 text-[11px] text-slate-400" title="Relaxed-ion: positions are relaxed at each fixed strain (needed for any structure with internal degrees of freedom)">
+      <span className="flex items-center gap-1 text-xs text-fg-3" title="Relaxed-ion: positions are relaxed at each fixed strain (needed for any structure with internal degrees of freedom)">
         ions
         <Segmented
           value={e.relaxIons ? "relaxed" : "clamped"}
@@ -185,7 +185,7 @@ export function ElasticPane() {
   const hasCrystal = useCrystalStore((s) => s.crystal !== null);
   const compute = () => (running ? commands.stop() : commands.computeElastic());
   const button = (
-    <Button className="px-2 py-0.5 text-[10.5px]" variant={running ? "danger" : "ghost"} disabled={!connected || !hasCrystal || !!running?.stopping} onClick={compute}>
+    <Button className="px-2 py-0.5 text-xs" variant={running ? "danger" : "ghost"} disabled={!connected || !hasCrystal || !!running?.stopping} onClick={compute}>
       {running ? <Square size={10} /> : <Sigma size={11} />} {running ? "Stop" : elastic ? "Recompute" : "Compute elastic tensor"}
     </Button>
   );
@@ -204,9 +204,9 @@ export function ElasticPane() {
         {elastic ? (
           <ElasticResultView r={elastic.result} stale={elastic.stateVersion !== stateVersion} />
         ) : (
-          <div className="grid h-full place-items-center text-center text-[11px] text-slate-500">
+          <div className="grid h-full place-items-center text-center text-xs text-fg-4">
             {running ? (
-              <span className="flex items-center gap-1.5 text-cyan-200">
+              <span className="flex items-center gap-1.5 text-fg-2">
                 <Loader2 size={12} className="animate-spin" /> fitting stress vs strain…
               </span>
             ) : (

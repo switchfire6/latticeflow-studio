@@ -8,7 +8,7 @@ import { StudioClient, dispatchServerMessage, type WebSocketLike } from "../src/
 import { DEFAULT_RELAX, badgeCriteria } from "../src/store/settings";
 import { createCrystalStore, type ElasticState, type PhononSummary } from "../src/store/useCrystalStore";
 import type { ClientCommand, CrystalStatePayload, ElasticTensorResult, PhononConvergenceResult, ServerMessage } from "../src/types/protocol";
-import { branchOfBand, connectedFrequencies, gammaQIndex, logAxisTicks } from "../src/utils/bandChart";
+import { branchOfBand, connectedFrequencies, formatTick, gammaQIndex, logAxisTicks, niceTicks } from "../src/utils/bandChart";
 import { dispersionCsv, elasticCsv, toCsv } from "../src/utils/csv";
 import { broadenPattern, parsePattern, transformPattern } from "../src/utils/diffraction";
 import { computeScorecard, type ScorecardInput } from "../src/utils/scorecard";
@@ -342,5 +342,17 @@ describe("dispatcher: Phase B events", () => {
     const store = createCrystalStore();
     dispatchServerMessage(store, { type: "ELASTIC_TENSOR_RESULT", payload: ELASTIC });
     expect(store.getState().elastic?.result.k_vrh_gpa).toBe(174);
+  });
+});
+
+describe("axis tick labels", () => {
+  it("formatTick precision follows the tick step, so adjacent ticks never repeat", () => {
+    const ticks = niceTicks(-8.0253, -8.0238, 4);
+    const step = Math.abs(ticks[1]! - ticks[0]!);
+    const labels = ticks.map((t) => formatTick(t, step));
+    expect(new Set(labels).size).toBe(labels.length);
+    expect(formatTick(-8.0245, 0.0005)).toBe("-8.0245");
+    expect(formatTick(20, 5)).toBe("20");
+    expect(formatTick(0, 0.001)).toBe("0");
   });
 });

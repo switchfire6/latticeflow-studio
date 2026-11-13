@@ -30,9 +30,9 @@ import { Button, CollapsibleCard, FallbackTag, cx } from "./ui";
 
 function Cell({ label, value, title }: { label: ReactNode; value: ReactNode; title?: string }) {
   return (
-    <div className="flex items-baseline justify-between gap-1 rounded bg-white/[0.025] px-1.5 py-0.5" title={title}>
-      <span className="text-[10px] text-slate-500">{label}</span>
-      <span className="font-mono text-[11px] text-slate-100 tabular-nums">{value}</span>
+    <div className="flex items-baseline justify-between gap-1 rounded-ctl bg-raised px-1.5 py-0.5" title={title}>
+      <span className="text-2xs text-fg-4">{label}</span>
+      <span className="font-mono text-xs text-fg tabular-nums">{value}</span>
     </div>
   );
 }
@@ -77,9 +77,9 @@ export function StructureInfoView(p: StructureInfoProps) {
   const pu = p.pressureUnit;
 
   return (
-    <div className="space-y-2.5 text-[11px]" data-structure-info>
+    <div className="space-y-2.5 text-xs" data-structure-info>
       <div>
-        <div className="mb-1 text-[10px] tracking-wider text-slate-500 uppercase">Cell</div>
+        <div className="mb-1 text-xs font-medium text-fg-3">Cell</div>
         <div className="grid grid-cols-3 gap-1">
           <Cell label="a" value={`${L.a.toFixed(4)} Å`} />
           <Cell label="b" value={`${L.b.toFixed(4)} Å`} />
@@ -97,7 +97,7 @@ export function StructureInfoView(p: StructureInfoProps) {
       </div>
 
       <div>
-        <div className="mb-1 text-[10px] tracking-wider text-slate-500 uppercase">Symmetry</div>
+        <div className="mb-1 text-xs font-medium text-fg-3">Symmetry</div>
         <div className="grid grid-cols-2 gap-1">
           <div className="col-span-2">
             <Cell label="space group" value={`${c.spacegroup_symbol} (#${c.spacegroup_number})`} />
@@ -108,23 +108,23 @@ export function StructureInfoView(p: StructureInfoProps) {
       </div>
 
       <div>
-        <div className="mb-1 flex items-center justify-between text-[10px] tracking-wider text-slate-500 uppercase">
+        <div className="mb-1 flex items-center justify-between text-xs font-medium text-fg-3">
           <span>Stress</span>
           <RelaxationBadge verdict={verdict} />
         </div>
         <div className="space-y-1">
-          <div className="flex items-baseline justify-between rounded bg-white/[0.025] px-1.5 py-0.5">
-            <span className="text-[10px] text-slate-500">pressure P = −tr σ/3 (+ = compressed)</span>
-            <span className={cx("font-mono text-[12px] tabular-nums", verdict.state === "stressed" ? "text-amber-200" : "text-slate-100")} data-pressure>
+          <div className="flex items-baseline justify-between rounded-ctl bg-raised px-1.5 py-0.5">
+            <span className="text-2xs text-fg-4">pressure P = −tr σ/3 (+ = compressed)</span>
+            <span className={cx("font-mono text-sm tabular-nums", verdict.state === "stressed" ? "text-warn" : "text-fg")} data-pressure>
               {verdict.pressureGpa !== null ? formatPressure(verdict.pressureGpa, pu) : "—"}
             </span>
           </div>
-          <table className="w-full font-mono text-[10px] text-slate-300 tabular-nums" title="Stress tensor σ_ij (ASE sign: + = tensile)">
+          <table className="w-full font-mono text-2xs text-fg-2 tabular-nums" title="Stress tensor σ_ij (ASE sign: + = tensile)">
             <tbody>
               {VOIGT_INDEX.map((row, i) => (
                 <tr key={i}>
                   {row.map((vi, j) => (
-                    <td key={j} className={cx("px-1 text-right", i === j ? "text-slate-100" : "text-slate-400")}>
+                    <td key={j} className={cx("px-1 text-right", i === j ? "text-fg" : "text-fg-3")}>
                       {formatPressure(c.stress_gpa[vi] ?? NaN, pu, 2, { sign: false }).replace(/ (GPa|kbar)$/, "")}
                     </td>
                   ))}
@@ -133,7 +133,7 @@ export function StructureInfoView(p: StructureInfoProps) {
             </tbody>
           </table>
         </div>
-        <div className="mt-1 font-mono text-[10px] text-slate-500">
+        <div className="mt-1 font-mono text-2xs text-fg-4">
           σ in {pu}; max |σ_ij + P_ext δ_ij| = {verdict.maxStressDeviation?.toFixed(3) ?? "—"} GPa (tol {p.criteria.stressTolGpa}, P_ext {p.criteria.targetPressureGpa} GPa)
         </div>
       </div>
@@ -145,13 +145,13 @@ export function StructureInfoView(p: StructureInfoProps) {
             value={
               <span className="flex items-center gap-1">
                 {k != null ? `${k.toFixed(1)} GPa` : "—"}
-                {p.eos && p.eosStale && <span className="text-[9px] text-amber-300/80">(stale)</span>}
+                {p.eos && p.eosStale && <span className="text-2xs text-warn/80">(stale)</span>}
               </span>
             }
             title="Clamped-ion K from an E(V) fit at the current volume"
           />
         </div>
-        <Button className="px-2 py-1 text-[10.5px]" disabled={!p.canCompute || p.eosPending} onClick={p.onComputeK} title="Compute K and the equation of state (opens the EOS pane)">
+        <Button className="px-2 py-1 text-xs" disabled={!p.canCompute || p.eosPending} onClick={p.onComputeK} title="Compute K and the equation of state (opens the EOS pane)">
           {p.eosPending ? <Loader2 size={11} className="animate-spin" /> : <Gauge size={11} />} Compute K
         </Button>
         {k != null && <FallbackTag compact />}
@@ -159,7 +159,7 @@ export function StructureInfoView(p: StructureInfoProps) {
 
       {delta && (
         <div data-lattice-delta>
-          <div className="mb-1 text-[10px] tracking-wider text-slate-500 uppercase">
+          <div className="mb-1 text-xs font-medium text-fg-3">
             Change since the {p.latticeRef?.kind === "follow" ? "parent (follow)" : "relaxation start"}
           </div>
           <div className="grid grid-cols-2 gap-1">
@@ -168,14 +168,14 @@ export function StructureInfoView(p: StructureInfoProps) {
             <Cell label="Δc" value={pctText(delta.c)} />
             <Cell label={delta.volume !== null ? "ΔV" : "ΔV/at"} value={pctText(delta.volume ?? delta.volumePerAtom)} />
           </div>
-          {delta.volume === null && <div className="mt-0.5 text-[10px] text-slate-500">Supercell: only the volume per atom is comparable.</div>}
+          {delta.volume === null && <div className="mt-0.5 text-2xs text-fg-4">Supercell: only the volume per atom is comparable.</div>}
         </div>
       )}
 
       <div>
         <button
           type="button"
-          className="mb-1 flex w-full items-center justify-between text-[10px] tracking-wider text-slate-500 uppercase hover:text-slate-300"
+          className="mb-1 flex w-full items-center justify-between text-xs font-medium text-fg-3 hover:text-fg-2"
           onClick={() => setSitesOpen((o) => !o)}
           aria-expanded={sitesOpen}
         >
@@ -183,9 +183,9 @@ export function StructureInfoView(p: StructureInfoProps) {
           <span className="normal-case tracking-normal">{sitesOpen ? "hide" : "show"}</span>
         </button>
         {sitesOpen && (
-          <div className="max-h-56 overflow-y-auto rounded border border-white/[0.06] bg-black/20">
-            <table className="w-full font-mono text-[10px] tabular-nums" data-site-table>
-              <thead className="sticky top-0 bg-slate-950/95 text-slate-500">
+          <div className="max-h-56 overflow-y-auto rounded-ctl border border-line-soft bg-field">
+            <table className="w-full font-mono text-2xs tabular-nums" data-site-table>
+              <thead className="sticky top-0 bg-surface text-fg-4">
                 <tr>
                   <th className="px-1 py-0.5 text-right font-normal">#</th>
                   <th className="px-1 text-left font-normal">el</th>
@@ -201,20 +201,20 @@ export function StructureInfoView(p: StructureInfoProps) {
                   <tr
                     key={a.index}
                     onClick={() => p.onSelectAtom?.(a.index)}
-                    className={cx("cursor-pointer text-slate-300 hover:bg-white/5", p.selectedAtom === a.index && "bg-cyan-400/15 text-cyan-100")}
+                    className={cx("cursor-pointer text-fg-2 hover:bg-hover", p.selectedAtom === a.index && "bg-accent-soft text-accent-fg")}
                   >
-                    <td className="px-1 text-right text-slate-500">{a.index}</td>
+                    <td className="px-1 text-right text-fg-4">{a.index}</td>
                     <td className="px-1">
                       <span className="mr-1 inline-block h-1.5 w-1.5 rounded-full" style={{ background: cpkHex(a.atomic_number) }} />
                       {a.element}
                     </td>
-                    <td className="px-1 text-slate-400">{a.wyckoff ?? "—"}</td>
+                    <td className="px-1 text-fg-3">{a.wyckoff ?? "—"}</td>
                     {a.frac_coords.map((x, i) => (
                       <td key={i} className="px-1 text-right">
                         {x.toFixed(4)}
                       </td>
                     ))}
-                    <td className={cx("px-1 text-right", a.force_norm >= p.criteria.fmax ? "text-amber-300" : "text-slate-500")}>{a.force_norm.toFixed(3)}</td>
+                    <td className={cx("px-1 text-right", a.force_norm >= p.criteria.fmax ? "text-warn" : "text-fg-4")}>{a.force_norm.toFixed(3)}</td>
                   </tr>
                 ))}
               </tbody>
@@ -231,9 +231,9 @@ function PropertyActions({ connected }: { connected: boolean }) {
   const elasticRunning = useCrystalStore((s) => s.streams.some((x) => x.command === "COMPUTE_ELASTIC_TENSOR"));
   const busy = useCrystalStore((s) => s.streams.length > 0);
   return (
-    <div className="mt-2 grid grid-cols-2 gap-1.5 border-t border-white/[0.06] pt-2">
+    <div className="mt-2 grid grid-cols-2 gap-1.5 border-t border-line-soft pt-2">
       <Button
-        className="px-2 py-1 text-[10.5px]"
+        className="px-2 py-1 text-xs"
         disabled={!connected || (busy && !elasticRunning)}
         title="Elastic tensor C_ij, Born stability, VRH moduli (opens the elastic pane; settings there)"
         onClick={() => {
@@ -244,7 +244,7 @@ function PropertyActions({ connected }: { connected: boolean }) {
       >
         {elasticRunning ? <Loader2 size={11} className="animate-spin" /> : <Sigma size={11} />} Elastic tensor
       </Button>
-      <Button className="px-2 py-1 text-[10.5px]" onClick={() => showPane("xrd")} title="Simulated X-ray / neutron powder pattern with an experimental overlay">
+      <Button className="px-2 py-1 text-xs" onClick={() => showPane("xrd")} title="Simulated X-ray / neutron powder pattern with an experimental overlay">
         <Radar size={11} /> Diffraction (XRD)
       </Button>
     </div>
@@ -286,7 +286,7 @@ export function StructurePanel() {
           <MpMatchSection />
         </>
       ) : (
-        <p className="text-[11px] text-slate-500">No structure loaded.</p>
+        <p className="text-xs text-fg-4">No structure loaded.</p>
       )}
     </CollapsibleCard>
   );

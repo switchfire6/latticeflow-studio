@@ -1,10 +1,10 @@
 /**
- * R3F canvas (§6.1): #07090E radial-gradient background, subtle grid floor,
+ * R3F canvas (§6.1): neutral radial-gradient background, subtle grid floor,
  * depth fog, studio lighting (local Lightformer environment, no network),
  * OrbitControls, and post-processing (N8AO + selective Bloom with
  * luminanceThreshold 0.85 / intensity 0.65 + ACES tone mapping).
  *
- * Post-processing degrades gracefully: it can be toggled in the View panel,
+ * Post-processing degrades gracefully: it can be toggled in the display-settings menu,
  * forced with ?fx=0 / ?fx=1, and is switched off automatically when
  * drei's PerformanceMonitor reports a sustained frame-rate decline.
  *
@@ -151,7 +151,7 @@ export function CrystalCanvas() {
       <Environment resolution={128} frames={1}>
         <Lightformer form="rect" intensity={2.2} position={[0, 6, 4]} scale={[10, 4, 1]} color="#ffffff" />
         <Lightformer form="rect" intensity={1.1} position={[-6, 2, -2]} rotation-y={Math.PI / 2} scale={[8, 3, 1]} color="#8ab4ff" />
-        <Lightformer form="ring" intensity={0.9} position={[5, -1, -5]} scale={3} color="#22d3ee" />
+        <Lightformer form="ring" intensity={0.9} position={[5, -1, -5]} scale={3} color="#9fb4c8" />
       </Environment>
 
       <group rotation={[-Math.PI / 2, 0, 0]}>
@@ -189,7 +189,7 @@ export function CrystalCanvas() {
           const st = useCrystalStore.getState();
           if (forced === null && st.display.postprocessing) {
             st.setDisplay({ postprocessing: false });
-            st.pushToast("info", "Post-processing off", "Frame rate was low, so bloom and ambient occlusion were disabled. Re-enable them in the View panel.");
+            st.pushToast("info", "Post-processing off", "Frame rate was low, so bloom and ambient occlusion were disabled. Re-enable them under Display settings (the sliders button of the display bar).");
           }
         }}
       />

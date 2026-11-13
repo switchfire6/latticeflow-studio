@@ -32,7 +32,7 @@ import {
   qLabelAt,
   segmentBreaks,
 } from "../../utils/bandChart";
-import { CHART_COLORS, CHART_FONT, renderState, scale, useCanvasChart, type ChartSize } from "./useCanvasChart";
+import { CHART_COLORS, CHART_FONT, ink, renderState, scale, useCanvasChart, type ChartSize } from "./useCanvasChart";
 
 /** Branch-ordered frequencies per analysis (connectedFrequencies is O(nq·nb)). */
 const branchCache = new WeakMap<PhononAnalysisComplete, number[][]>();
@@ -90,7 +90,7 @@ function drawBase(ctx: CanvasRenderingContext2D, p: PhononAnalysisComplete, size
     ctx.moveTo(x0, Math.round(yt) + 0.5);
     ctx.lineTo(x1, Math.round(yt) + 0.5);
     ctx.stroke();
-    ctx.fillStyle = t < 0 ? "rgba(255, 120, 140, 0.9)" : CHART_COLORS.text;
+    ctx.fillStyle = t < 0 ? CHART_COLORS.crimsonText : CHART_COLORS.text;
     ctx.fillText(t.toFixed(Math.abs(t) < 10 && t % 1 !== 0 ? 1 : 0), x0 - 5, yt);
   }
   // high-symmetry verticals + labels
@@ -103,11 +103,11 @@ function drawBase(ctx: CanvasRenderingContext2D, p: PhononAnalysisComplete, size
     ctx.moveTo(px, yTop);
     ctx.lineTo(px, yBot);
     ctx.stroke();
-    ctx.fillStyle = "rgba(226, 232, 240, 0.9)";
+    ctx.fillStyle = CHART_COLORS.ink;
     ctx.fillText(tick.label, Math.min(Math.max(px, x0 + 6), x1 - 6), yBot + 5);
   }
   // zero line
-  ctx.strokeStyle = "rgba(226, 232, 240, 0.45)";
+  ctx.strokeStyle = CHART_COLORS.inkSoft;
   ctx.beginPath();
   ctx.moveTo(x0, Math.round(y(0)) + 0.5);
   ctx.lineTo(x1, Math.round(y(0)) + 0.5);
@@ -133,15 +133,12 @@ function drawBase(ctx: CanvasRenderingContext2D, p: PhononAnalysisComplete, size
   ctx.lineWidth = colorBranches ? 1.4 : 1.2;
   ctx.lineJoin = "round";
   real.forEach((path, i) => {
-    ctx.strokeStyle = colorBranches ? SERIES_COLORS[i]! : CHART_COLORS.sky;
+    ctx.strokeStyle = colorBranches ? ink(SERIES_COLORS[i]!) : CHART_COLORS.sky;
     ctx.stroke(path);
   });
   ctx.lineWidth = 1.8;
   ctx.strokeStyle = CHART_COLORS.crimson;
-  ctx.shadowColor = "rgba(255, 42, 84, 0.6)";
-  ctx.shadowBlur = 6;
   ctx.stroke(imag);
-  ctx.shadowBlur = 0;
   // axis label
   ctx.save();
   ctx.translate(11, (yTop + yBot) / 2);
@@ -212,25 +209,22 @@ export function PhononBandChart() {
       const order = phonon.band_order;
       const hoverBranch = hover ? branchOfBand(order, hover.qIndex, hover.band) : null;
       const selBranch = selection ? branchOfBand(order, selection.qIndex, selection.band) : null;
-      if (hoverBranch !== null && hoverBranch !== selBranch) drawBand(ctx, phonon, g, hoverBranch, "rgba(226, 232, 240, 0.35)", 1.5);
+      if (hoverBranch !== null && hoverBranch !== selBranch) drawBand(ctx, phonon, g, hoverBranch, CHART_COLORS.inkSoft, 1.5);
       if (selection && selBranch !== null) {
-        ctx.shadowColor = "rgba(34, 211, 238, 0.8)";
-        ctx.shadowBlur = 8;
         drawBand(ctx, phonon, g, selBranch, CHART_COLORS.cyan, 2.2);
-        ctx.shadowBlur = 0;
         const fq = phonon.frequencies_thz[selection.qIndex]?.[selection.band];
         if (fq !== undefined) {
           const px = g.x(d[selection.qIndex]!);
           const py = g.y(fq);
           const pending = !loaded || loaded.q_index !== selection.qIndex || loaded.band_index !== selection.band;
-          ctx.strokeStyle = "rgba(34, 211, 238, 0.5)";
+          ctx.strokeStyle = CHART_COLORS.cyan;
           ctx.setLineDash([3, 3]);
           ctx.beginPath();
           ctx.moveTo(px + 0.5, M.top);
           ctx.lineTo(px + 0.5, size.height - M.bottom);
           ctx.stroke();
           ctx.setLineDash(pending ? [2, 2] : []);
-          ctx.fillStyle = pending ? "rgba(7, 9, 14, 0.9)" : "#e0f7ff";
+          ctx.fillStyle = pending ? CHART_COLORS.tooltipBg : CHART_COLORS.ink;
           ctx.strokeStyle = CHART_COLORS.cyan;
           ctx.lineWidth = 2;
           ctx.beginPath();
@@ -245,7 +239,7 @@ export function PhononBandChart() {
         if (fq !== undefined) {
           const px = g.x(d[hover.qIndex]!);
           const py = g.y(fq);
-          ctx.fillStyle = "rgba(226, 232, 240, 0.9)";
+          ctx.fillStyle = CHART_COLORS.ink;
           ctx.beginPath();
           ctx.arc(px, py, 3, 0, Math.PI * 2);
           ctx.fill();
@@ -255,9 +249,9 @@ export function PhononBandChart() {
           const w = ctx.measureText(text).width + 10;
           const tx = Math.min(Math.max(px + 8, M.left), size.width - M.right - w);
           const ty = Math.max(M.top, py - 22);
-          ctx.fillStyle = "rgba(2, 6, 23, 0.88)";
+          ctx.fillStyle = CHART_COLORS.tooltipBg;
           ctx.fillRect(tx, ty, w, 16);
-          ctx.fillStyle = fq < 0 ? "#fda4af" : "#e2e8f0";
+          ctx.fillStyle = fq < 0 ? CHART_COLORS.crimsonText : CHART_COLORS.ink;
           ctx.textAlign = "left";
           ctx.textBaseline = "middle";
           ctx.fillText(text, tx + 5, ty + 8);
@@ -274,7 +268,7 @@ export function PhononBandChart() {
     return nearestMode(phonon.kpath_distances, phonon.frequencies_thz, g.x.invert(e.clientX - rect.left), g.y.invert(e.clientY - rect.top));
   };
 
-  if (!phonon) return <div className="grid h-full place-items-center text-[11px] text-slate-500">Run the phonon shake-test to compute ω(q).</div>;
+  if (!phonon) return <div className="grid h-full place-items-center text-xs text-fg-4">Run phonons to compute ω(q).</div>;
 
   return (
     <div className="relative h-full w-full">
@@ -292,11 +286,11 @@ export function PhononBandChart() {
         }}
       />
       {summary && (
-        <div className="pointer-events-none absolute top-2 right-3 left-12 truncate text-right font-mono text-[10px] whitespace-nowrap text-slate-400">
+        <div className="pointer-events-none absolute top-2 right-3 left-12 truncate text-right font-mono text-2xs whitespace-nowrap text-fg-3">
           {summary.imaginaryBands.length ? (
-            <span className="text-rose-300">{phonon.imaginary_mode_count} imaginary · min {formatFrequency(phonon.min_frequency_thz, unit)}</span>
+            <span className="text-bad">{phonon.imaginary_mode_count} imaginary · min {formatFrequency(phonon.min_frequency_thz, unit)}</span>
           ) : (
-            <span className="text-emerald-300">all real</span>
+            <span className="text-ok">all real</span>
           )}
           {` · ${summary.nBands} branches × ${summary.nq} q`}
         </div>

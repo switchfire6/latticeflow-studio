@@ -146,6 +146,24 @@ export function niceTicks(lo: number, hi: number, target = 5): number[] {
   return out;
 }
 
+/**
+ * Format an axis tick value with precision matching the tick step so adjacent
+ * ticks never round to identical labels (e.g. -8.0245 vs -8.0240).
+ */
+export function formatTick(value: number, step?: number): string {
+  if (!Number.isFinite(value)) return "—";
+  if (Math.abs(value) === 0) return "0";
+  if (step !== undefined && Number.isFinite(step) && step > 0) {
+    const decimals = Math.max(0, Math.min(8, Math.ceil(-Math.log10(step) - 1e-9)));
+    const rounded = Math.abs(value) < step * 1e-9 ? 0 : value;
+    return rounded.toFixed(decimals);
+  }
+  const a = Math.abs(value);
+  if (a >= 1000) return value.toFixed(0);
+  if (a >= 10) return String(+value.toFixed(1));
+  return String(+value.toPrecision(4));
+}
+
 /** y-range of the chart: always includes 0 and a little headroom. */
 export function frequencyRange(summary: Pick<BandSummary, "minFrequency" | "maxFrequency">): [number, number] {
   const lo = Math.min(0, summary.minFrequency);

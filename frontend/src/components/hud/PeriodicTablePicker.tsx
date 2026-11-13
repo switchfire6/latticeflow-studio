@@ -35,7 +35,7 @@ export function PeriodicTablePicker({
     <div
       ref={ref}
       className={cx(
-        "z-50 rounded-xl border border-white/10 bg-slate-950/95 p-2 shadow-[0_12px_48px_rgba(0,0,0,0.6)] backdrop-blur-md",
+        "z-50 rounded-panel border border-line bg-surface p-2 shadow-lg shadow-black/40",
         className,
       )}
     >
@@ -52,12 +52,12 @@ export function PeriodicTablePicker({
               onClick={() => onPick(c.symbol)}
               style={{ gridRow: c.row, gridColumn: c.col, borderColor: isSel || isCur ? undefined : `${cpkHex(c.z)}55` }}
               className={cx(
-                "flex items-center justify-center rounded-[4px] border font-mono text-[10px] leading-none transition-colors",
+                "flex items-center justify-center rounded-[4px] border text-2xs leading-none transition-colors",
                 isCur
-                  ? "border-white bg-white/20 text-white"
+                  ? "border-white bg-white/20 text-fg"
                   : isSel
-                    ? "border-cyan-300 bg-cyan-400/25 text-cyan-50"
-                    : "bg-white/[0.03] text-slate-300 hover:bg-cyan-400/15 hover:text-white",
+                    ? "border-accent/60 bg-accent-soft text-accent-fg"
+                    : "bg-raised text-fg-2 hover:bg-hover hover:text-fg",
               )}
             >
               {c.symbol}

@@ -5,6 +5,7 @@
  * `frame.version`, so high-rate data redraws the canvas without any React render.
  */
 import { useEffect, useRef, type RefObject } from "react";
+import { SERIES_COLORS } from "../../utils/chartData";
 
 export interface ChartSize {
   width: number; // CSS px
@@ -21,8 +22,9 @@ export type DrawFn = (ctx: CanvasRenderingContext2D, size: ChartSize) => void;
 export const renderState = { dpr: 1, exporting: false };
 
 /** Offscreen renderers of the mounted charts (PNG export, utils/pngExport.ts). */
-const renderers = new WeakMap<HTMLCanvasElement, (dpr: number) => HTMLCanvasElement>();
-export function chartRenderer(canvas: HTMLCanvasElement): ((dpr: number) => HTMLCanvasElement) | null {
+export type ChartRenderer = (dpr: number, theme?: ChartTheme) => HTMLCanvasElement;
+const renderers = new WeakMap<HTMLCanvasElement, ChartRenderer>();
+export function chartRenderer(canvas: HTMLCanvasElement): ChartRenderer | null {
   return renderers.get(canvas) ?? null;
 }
 
@@ -46,7 +48,7 @@ export function useCanvasChart(
     let lastKey: unknown = Symbol("init");
     let lastDraw: DrawFn | null = null;
 
-    renderers.set(canvas, (dpr: number) => {
+    renderers.set(canvas, (dpr: number, theme: ChartTheme = "dark") => {
       const off = document.createElement("canvas");
       off.width = Math.max(1, Math.round(size.width * dpr));
       off.height = Math.max(1, Math.round(size.height * dpr));
@@ -57,7 +59,7 @@ export function useCanvasChart(
       renderState.dpr = dpr;
       renderState.exporting = true;
       try {
-        drawRef.current(octx, size);
+        withChartTheme(theme, () => drawRef.current(octx, size));
       } finally {
         Object.assign(renderState, prev);
       }
@@ -107,17 +109,84 @@ export function useCanvasChart(
   }, [canvasRef]);
 }
 
-export const CHART_FONT = '10px "JetBrains Mono", "Cascadia Mono", ui-monospace, Consolas, monospace';
-export const CHART_COLORS = {
-  axis: "rgba(148, 163, 184, 0.35)",
-  grid: "rgba(148, 163, 184, 0.08)",
-  text: "rgba(148, 163, 184, 0.85)",
-  cyan: "#22d3ee",
-  sky: "rgba(125, 211, 252, 0.8)",
-  amber: "#f5a524",
-  crimson: "#ff2a54",
-  crimsonFill: "rgba(255, 42, 84, 0.09)",
+export const CHART_FONT = '10px "JetBrains Mono Variable", "JetBrains Mono", "Cascadia Mono", ui-monospace, Consolas, monospace';
+export type ChartTheme = "dark" | "publication";
+
+/** Light-surface steps of the categorical series (same hues, validated on white). */
+export const SERIES_COLORS_LIGHT = ["#2a78d6", "#eb6834", "#1baf7a", "#eda100", "#e87ba4", "#6250d6"] as const;
+
+/** Mirrors the tokens in src/index.css (canvas cannot read CSS variables cheaply). */
+const DARK = {
+  background: "#16191e",
+  axis: "rgba(155, 161, 170, 0.35)",
+  grid: "rgba(155, 161, 170, 0.08)",
+  text: "rgba(155, 161, 170, 0.9)",
+  /** Strong ink: path labels, hover marks, the zero line. */
+  ink: "rgba(231, 233, 236, 0.9)",
+  inkSoft: "rgba(231, 233, 236, 0.4)",
+  /** Selection (the UI accent). */
+  cyan: "#3fb0c9",
+  /** Single-series default (series slot 1). */
+  sky: SERIES_COLORS[0] as string,
+  /** Second series (slot 2). */
+  amber: SERIES_COLORS[1] as string,
+  /** Status: imaginary / unstable. */
+  crimson: "#e5534b",
+  crimsonText: "#f0857e",
+  crimsonFill: "rgba(229, 83, 75, 0.09)",
+  ok: "#3fb950",
+  tooltipBg: "rgba(22, 25, 30, 0.94)",
 };
+const PUBLICATION: typeof DARK = {
+  background: "#ffffff",
+  axis: "rgba(40, 44, 52, 0.7)",
+  grid: "rgba(40, 44, 52, 0.1)",
+  text: "#30343b",
+  ink: "#16191e",
+  inkSoft: "rgba(22, 25, 30, 0.35)",
+  cyan: "#1d7f96",
+  sky: SERIES_COLORS_LIGHT[0],
+  amber: SERIES_COLORS_LIGHT[1],
+  crimson: "#c92f2f",
+  crimsonText: "#b42525",
+  crimsonFill: "rgba(201, 47, 47, 0.08)",
+  ok: "#1f8a32",
+  tooltipBg: "rgba(255, 255, 255, 0.94)",
+};
+
+/**
+ * Live chart palette: `CHART_COLORS` holds the dark values and is swapped to
+ * the publication (white) values while an export renders (`withChartTheme`).
+ * Draw code must read it at draw time, never cache it in module constants.
+ */
+export const CHART_COLORS = { ...DARK };
+let currentTheme: ChartTheme = "dark";
+
+export function chartTheme(): ChartTheme {
+  return currentTheme;
+}
+
+/** Map a series colour (dark step) to the current theme's step; other colours pass through. */
+export function ink(color: string): string {
+  if (currentTheme === "dark") return color;
+  const i = (SERIES_COLORS as readonly string[]).indexOf(color);
+  if (i >= 0) return SERIES_COLORS_LIGHT[i]!;
+  const key = (Object.keys(DARK) as (keyof typeof DARK)[]).find((k) => DARK[k] === color);
+  return key ? PUBLICATION[key] : color;
+}
+
+/** Run `fn` with the chart palette switched to `theme`. */
+export function withChartTheme<T>(theme: ChartTheme, fn: () => T): T {
+  const prev = currentTheme;
+  currentTheme = theme;
+  Object.assign(CHART_COLORS, theme === "publication" ? PUBLICATION : DARK);
+  try {
+    return fn();
+  } finally {
+    currentTheme = prev;
+    Object.assign(CHART_COLORS, prev === "publication" ? PUBLICATION : DARK);
+  }
+}
 
 /** Linear scale helper. */
 export function scale(d0: number, d1: number, r0: number, r1: number) {

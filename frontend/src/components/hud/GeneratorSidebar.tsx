@@ -142,12 +142,12 @@ function ElementTags({ elements, onChange }: { elements: string[]; onChange(e: s
   const toggle = (s: string) => onChange(elements.includes(s) ? elements.filter((x) => x !== s) : [...elements, s]);
   return (
     <div className="relative">
-      <div className="flex min-h-9 flex-wrap items-center gap-1 rounded-lg border border-white/10 bg-white/[0.02] p-1.5 focus-within:border-cyan-400/50">
+      <div className="flex min-h-9 flex-wrap items-center gap-1 rounded-ctl border border-line bg-raised p-1.5 focus-within:border-accent">
         {elements.map((s) => (
-          <span key={s} className="inline-flex items-center gap-1 rounded-md bg-white/[0.06] py-0.5 pr-1 pl-1.5 font-mono text-[11px] text-slate-100">
+          <span key={s} className="inline-flex items-center gap-1 rounded-ctl bg-raised py-0.5 pr-1 pl-1.5 font-mono text-xs text-fg">
             <span className="h-2 w-2 rounded-full" style={{ background: cpkHex(elementBySymbol(s)!.z) }} />
             {s}
-            <button type="button" className="text-slate-500 hover:text-rose-300" onClick={() => toggle(s)} aria-label={`remove ${s}`}>
+            <button type="button" className="text-fg-4 hover:text-bad" onClick={() => toggle(s)} aria-label={`remove ${s}`}>
               <X size={11} />
             </button>
           </span>
@@ -158,13 +158,13 @@ function ElementTags({ elements, onChange }: { elements: string[]; onChange(e: s
           onKeyDown={onKey}
           onBlur={() => draft && add(draft)}
           placeholder={elements.length ? "" : "Li, Ti, O…"}
-          className="min-w-[3rem] flex-1 bg-transparent px-1 font-mono text-[12px] text-slate-100 outline-none placeholder:text-slate-600"
+          className="min-w-[3rem] flex-1 bg-transparent px-1 font-mono text-sm text-fg outline-none placeholder:text-fg-5"
         />
         <button
           type="button"
           title="Periodic table"
           onClick={() => setOpen((o) => !o)}
-          className={cx("rounded-md p-1 text-slate-400 hover:bg-white/5 hover:text-cyan-200", open && "text-cyan-300")}
+          className={cx("rounded-ctl p-1 text-fg-3 hover:bg-hover hover:text-fg", open && "text-fg-3")}
         >
           <Grid3x3 size={14} />
         </button>
@@ -178,7 +178,7 @@ function ElementTags({ elements, onChange }: { elements: string[]; onChange(e: s
 
 export function GeneratorSidebar() {
   return (
-    <aside className="flex w-[320px] shrink-0 flex-col border-r border-white/[0.06] bg-slate-950/60 backdrop-blur-md">
+    <aside className="flex w-[320px] shrink-0 flex-col border-r border-line-soft bg-surface">
       <div className="flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto p-3">
         <LoadCard />
         <StructurePanel />
@@ -188,7 +188,7 @@ export function GeneratorSidebar() {
         <SymmetryExportCard />
       </div>
       {/* Primary actions stay reachable without scrolling (Phase B): sticky action bar. */}
-      <div className="max-h-[60%] shrink-0 overflow-y-auto border-t border-white/[0.08] bg-slate-950/80 p-3 shadow-[0_-8px_24px_rgba(0,0,0,0.35)]" data-action-bar>
+      <div className="max-h-[60%] shrink-0 overflow-y-auto border-t border-line bg-surface p-3" data-action-bar>
         <StructureActions layout="bar" />
       </div>
     </aside>
@@ -201,7 +201,7 @@ function LoadCard() {
   const [presetId, setPresetId] = useState("");
   const selectedPreset = presets.find((p) => p.id === presetId);
   return (
-    <CollapsibleCard id="load" title="Load structure" right={<FlaskConical size={12} className="text-cyan-300/70" />}>
+    <CollapsibleCard id="load" title="Load structure" right={<FlaskConical size={12} className="text-fg-4" />}>
       <div className="flex gap-2">
         <select className={inputCls} value={presetId} onChange={(e) => setPresetId(e.target.value)}>
           <option value="">{presets.length ? "Choose a preset…" : "Loading presets…"}</option>
@@ -215,7 +215,7 @@ function LoadCard() {
           Load
         </Button>
       </div>
-      {selectedPreset && <p className="mt-2 text-[11px] leading-snug text-slate-400">{selectedPreset.description}</p>}
+      {selectedPreset && <p className="mt-2 text-xs leading-snug text-fg-3">{selectedPreset.description}</p>}
       <div className="mt-2 space-y-2">
         <ImportButtons />
         <MaterialsProjectButton />
@@ -248,12 +248,12 @@ function GeneratorCard() {
   };
 
   return (
-    <CollapsibleCard id="generator" title="Generate candidates" right={<Sparkles size={12} className="text-cyan-300/70" />}>
+    <CollapsibleCard id="generator" title="Generate candidates" right={<Sparkles size={12} className="text-fg-4" />}>
       <div className="space-y-3">
-        <p className="text-[10.5px] leading-snug text-slate-500" data-generator-note>
+        <p className="text-xs leading-snug text-fg-4" data-generator-note>
           Symmetry-constrained search over Wyckoff assignments, scored with the session model and shown as a flow-matching style trajectory (not a learned generative model).
         </p>
-        <div className="flex rounded-lg border border-white/10 bg-white/[0.02] p-0.5 text-[11px]">
+        <div className="flex rounded-ctl border border-line bg-raised p-0.5 text-xs">
           {(
             [
               ["formula", "Formula"],
@@ -265,7 +265,7 @@ function GeneratorCard() {
               type="button"
               onClick={() => set({ mode: m })}
               title={m === "elements" ? "Let the server choose the stoichiometry" : "Fix the stoichiometry"}
-              className={cx("flex-1 rounded-md px-2 py-1 transition-colors", form.mode === m ? "bg-cyan-400/20 text-cyan-100" : "text-slate-400 hover:text-slate-200")}
+              className={cx("flex-1 rounded-ctl px-2 py-1 transition-colors", form.mode === m ? "bg-accent-soft text-accent-fg" : "text-fg-3 hover:text-fg")}
             >
               {label}
             </button>
@@ -275,9 +275,9 @@ function GeneratorCard() {
         {form.mode === "formula" ? (
           <div className="grid grid-cols-[1fr_84px] gap-2">
             <label className="block">
-              <div className="mb-1 text-[11px] text-slate-400">Formula</div>
+              <div className="mb-1 text-xs text-fg-3">Formula</div>
               <input
-                className={cx(inputCls, formulaInvalid && "border-rose-500/60")}
+                className={cx(inputCls, formulaInvalid && "border-bad/60")}
                 value={form.formula}
                 spellCheck={false}
                 placeholder="SrTiO3, Li2MnO3…"
@@ -289,7 +289,7 @@ function GeneratorCard() {
               />
             </label>
             <label className="block" title="Formula units per cell (Z)">
-              <div className="mb-1 text-[11px] text-slate-400">f.u. / cell</div>
+              <div className="mb-1 text-xs text-fg-3">f.u. / cell</div>
               <input
                 type="number"
                 min={1}
@@ -303,7 +303,7 @@ function GeneratorCard() {
         ) : (
           <>
             <div>
-              <div className="mb-1 text-[11px] text-slate-400">Chemical system</div>
+              <div className="mb-1 text-xs text-fg-3">Chemical system</div>
               <ElementTags elements={form.elements} onChange={(elements) => set({ elements })} />
             </div>
             <Slider label="Atoms / cell" value={form.numAtoms} min={2} max={MAX_GENERATED_ATOMS} onChange={(numAtoms) => set({ numAtoms })} />
@@ -311,7 +311,7 @@ function GeneratorCard() {
         )}
 
         <div>
-          <div className="mb-1 text-[11px] text-slate-400">Symmetry target</div>
+          <div className="mb-1 text-xs text-fg-3">Symmetry target</div>
           <div className="flex gap-2">
             <select className={inputCls} value={form.symmetry} onChange={(e) => set({ symmetry: e.target.value as SymmetryChoice })}>
               <option value="any">Any (server picks)</option>
@@ -351,7 +351,7 @@ function GeneratorCard() {
             type="button"
             aria-expanded={advanced}
             onClick={() => setAdvanced((a) => !a)}
-            className="flex items-center gap-1 text-[10px] font-semibold tracking-[0.14em] text-slate-500 uppercase hover:text-slate-300"
+            className="flex items-center gap-1 text-xs font-medium text-fg-3 hover:text-fg"
           >
             {advanced ? <ChevronDown size={11} /> : <ChevronRight size={11} />} Advanced (sampler)
           </button>
@@ -368,7 +368,7 @@ function GeneratorCard() {
               />
               <Slider label="Integration steps" value={form.steps} min={10} max={200} step={5} onChange={(steps) => set({ steps })} />
               <label className="block">
-                <div className="mb-1 text-[11px] text-slate-400">Seed (optional)</div>
+                <div className="mb-1 text-xs text-fg-3">Seed (optional)</div>
                 <input
                   className={inputCls}
                   inputMode="numeric"
@@ -381,16 +381,16 @@ function GeneratorCard() {
           )}
         </div>
 
-        <div className={cx("rounded-md bg-white/[0.025] px-2 py-1 font-mono text-[10.5px]", preview.ok ? "text-slate-400" : "text-rose-300")} data-preview>
+        <div className={cx("rounded-ctl bg-raised px-2 py-1 font-mono text-xs", preview.ok ? "text-fg-3" : "text-bad")} data-preview>
           {preview.ok ? (
             <>
               {"→ "}
               {preview.composition ? (
-                <span className="text-slate-200">
+                <span className="text-fg">
                   <FormulaText formula={preview.composition} />
                 </span>
               ) : (
-                <span className="text-slate-200">{form.elements.join("–")} (server stoichiometry)</span>
+                <span className="text-fg">{form.elements.join("–")} (server stoichiometry)</span>
               )}
               {` · ${preview.atoms} atoms · ${symText}`}
             </>
@@ -408,7 +408,7 @@ function GeneratorCard() {
           format={(v) => (v === 1 ? "best only" : `top ${v}`)}
         />
 
-        <Button variant={flowStream ? "danger" : "primary"} className="w-full py-2 text-[13px]" disabled={!connected || (!flowStream && !preview.ok)} onClick={synthesize}>
+        <Button variant={flowStream ? "danger" : "primary"} className="w-full py-2 text-md" disabled={!connected || (!flowStream && !preview.ok)} onClick={synthesize}>
           {flowStream ? (
             <>
               <Square size={13} /> Stop

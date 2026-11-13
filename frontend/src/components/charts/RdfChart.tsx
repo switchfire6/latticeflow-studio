@@ -54,7 +54,7 @@ export function RdfChart() {
       ctx.fillText("r (Å)", size.width - M.right, M.top);
       // g = 1 reference
       ctx.setLineDash([4, 4]);
-      ctx.strokeStyle = "rgba(226, 232, 240, 0.3)";
+      ctx.strokeStyle = CHART_COLORS.inkSoft;
       ctx.beginPath();
       ctx.moveTo(M.left, y(1));
       ctx.lineTo(size.width - M.right, y(1));
@@ -68,12 +68,11 @@ export function RdfChart() {
       fill.lineTo(x(r[r.length - 1]!), yBot);
       fill.lineTo(x(r[0]!), yBot);
       fill.closePath();
-      const grad = ctx.createLinearGradient(0, M.top, 0, yBot);
-      grad.addColorStop(0, "rgba(34, 211, 238, 0.28)");
-      grad.addColorStop(1, "rgba(34, 211, 238, 0.02)");
-      ctx.fillStyle = grad;
+      ctx.globalAlpha = 0.12;
+      ctx.fillStyle = CHART_COLORS.sky;
       ctx.fill(fill);
-      ctx.strokeStyle = CHART_COLORS.cyan;
+      ctx.globalAlpha = 1;
+      ctx.strokeStyle = CHART_COLORS.sky;
       ctx.lineWidth = 1.6;
       ctx.stroke(line);
     },

@@ -1,8 +1,67 @@
 @import "tailwindcss";
+@import "@fontsource-variable/inter/wght.css";
+@import "@fontsource-variable/jetbrains-mono/wght.css";
 
+/*
+ * Design tokens: the single source for colour, type and radius.
+ * Surfaces are flat and opaque; the accent has one job (selection / active /
+ * focus); status colours are for status only; chart series have their own
+ * categorical palette (colour-blind-safe order, stepped for the dark surface).
+ * The same series values are mirrored for the canvas charts in
+ * src/components/charts/theme.ts — keep the two in sync.
+ */
 @theme {
-  --font-sans: "Inter", "Segoe UI Variable", "Segoe UI", system-ui, -apple-system, sans-serif;
-  --font-mono: "JetBrains Mono", "Cascadia Mono", "SF Mono", ui-monospace, Consolas, monospace;
+  --font-sans: "Inter Variable", "Inter", "Segoe UI Variable", "Segoe UI", system-ui, -apple-system, sans-serif;
+  --font-mono: "JetBrains Mono Variable", "JetBrains Mono", "Cascadia Mono", "SF Mono", ui-monospace, Consolas, monospace;
+
+  /* type scale: four sizes, nothing below 10px */
+  --text-2xs: 10px;
+  --text-2xs--line-height: 14px;
+  --text-xs: 11px;
+  --text-xs--line-height: 16px;
+  --text-sm: 12px;
+  --text-sm--line-height: 17px;
+  --text-md: 14px;
+  --text-md--line-height: 20px;
+
+  /* radii: one for controls, one for panels */
+  --radius-ctl: 4px;
+  --radius-panel: 6px;
+
+  /* surfaces */
+  --color-canvas: #0e1013;
+  --color-surface: #16191e;
+  --color-raised: #1d2127;
+  --color-field: #111418;
+  --color-hover: #242931;
+  --color-line-soft: #22262c;
+  --color-line: #2c3138;
+  --color-line-strong: #3e444d;
+
+  /* text levels */
+  --color-fg: #e7e9ec;
+  --color-fg-2: #c2c6cd;
+  --color-fg-3: #9ba1aa;
+  --color-fg-4: #7c828c;
+  --color-fg-5: #555b64;
+
+  /* accent: selection, active, focus — nothing else */
+  --color-accent: #3fb0c9;
+  --color-accent-fg: #a9e1ee;
+  --color-accent-soft: #173640;
+
+  /* status: pass / warn / fail only */
+  --color-ok: #3fb950;
+  --color-warn: #d9a23a;
+  --color-bad: #e5534b;
+
+  /* chart series (categorical, dark surface) */
+  --color-series-1: #3987e5;
+  --color-series-2: #d95926;
+  --color-series-3: #199e70;
+  --color-series-4: #c98500;
+  --color-series-5: #d55181;
+  --color-series-6: #9085e9;
 }
 
 html,
@@ -10,61 +69,49 @@ body,
 #root {
   height: 100%;
   margin: 0;
-  background: #07090e;
-  color: #e2e8f0;
+  background: var(--color-canvas);
+  color: var(--color-fg);
+  font-family: var(--font-sans);
   overflow: hidden;
   -webkit-font-smoothing: antialiased;
 }
 
 select option {
-  background: #0b1120;
+  background: var(--color-field);
 }
 
 /* range sliders */
 .lf-range {
   -webkit-appearance: none;
   appearance: none;
-  height: 4px;
+  height: 3px;
   border-radius: 9999px;
-  background: linear-gradient(90deg, rgba(34, 211, 238, 0.45), rgba(148, 163, 184, 0.15));
+  background: var(--color-line-strong);
   outline: none;
 }
 .lf-range::-webkit-slider-thumb {
   -webkit-appearance: none;
-  width: 13px;
-  height: 13px;
+  width: 12px;
+  height: 12px;
   border-radius: 9999px;
-  background: #e0f7ff;
-  border: 2px solid #22d3ee;
-  box-shadow: 0 0 10px rgba(34, 211, 238, 0.6);
+  background: var(--color-fg);
+  border: 2px solid var(--color-accent);
   cursor: pointer;
 }
 .lf-range::-moz-range-thumb {
-  width: 11px;
-  height: 11px;
+  width: 10px;
+  height: 10px;
   border-radius: 9999px;
-  background: #e0f7ff;
-  border: 2px solid #22d3ee;
+  background: var(--color-fg);
+  border: 2px solid var(--color-accent);
   cursor: pointer;
 }
+.lf-range:focus-visible::-webkit-slider-thumb {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 1px;
+}
 .lf-range:disabled::-webkit-slider-thumb {
-  border-color: #475569;
-  box-shadow: none;
-}
-
-@keyframes lf-pulse-red {
-  0%,
-  100% {
-    box-shadow: 0 0 6px rgba(255, 42, 84, 0.35);
-    border-color: rgba(255, 42, 84, 0.45);
-  }
-  50% {
-    box-shadow: 0 0 18px rgba(255, 42, 84, 0.85);
-    border-color: rgba(255, 42, 84, 0.95);
-  }
-}
-.lf-pulse-red {
-  animation: lf-pulse-red 1.4s ease-in-out infinite;
+  border-color: var(--color-fg-5);
 }
 
 @keyframes lf-indeterminate {

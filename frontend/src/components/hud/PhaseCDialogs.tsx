@@ -40,12 +40,12 @@ export function Modal({ title, width = 520, onClose, children }: { title: ReactN
     return () => window.removeEventListener("keydown", k);
   }, [onClose]);
   return createPortal(
-    <div className="fixed inset-0 z-[100] grid place-items-center bg-black/50 backdrop-blur-[2px]" onMouseDown={(e) => e.target === e.currentTarget && onClose()}>
-      <Panel className="max-h-[calc(100vh-32px)] max-w-[calc(100vw-32px)] overflow-y-auto p-4">
+    <div className="fixed inset-0 z-[100] grid place-items-center bg-black/50" onMouseDown={(e) => e.target === e.currentTarget && onClose()}>
+      <Panel floating className="max-h-[calc(100vh-32px)] max-w-[calc(100vw-32px)] overflow-y-auto p-4">
         <div style={{ width }} data-dialog>
           <div className="mb-2 flex items-center justify-between">
-            <span className="text-[10px] font-semibold tracking-[0.18em] text-slate-400 uppercase">{title}</span>
-            <button type="button" onClick={onClose} className="text-slate-500 hover:text-slate-200" aria-label="close">
+            <span className="text-2xs font-semibold tracking-[0.06em] text-fg-3 uppercase">{title}</span>
+            <button type="button" onClick={onClose} className="text-fg-4 hover:text-fg" aria-label="close">
               <X size={14} />
             </button>
           </div>
@@ -59,7 +59,7 @@ export function Modal({ title, width = 520, onClose, children }: { title: ReactN
 
 export function Warn({ children }: { children: ReactNode }) {
   return (
-    <p className="flex gap-1 rounded-md border border-amber-400/30 bg-amber-400/[0.07] px-2 py-1 text-[10.5px] leading-snug text-amber-200">
+    <p className="flex gap-1 rounded-ctl border border-warn/30 bg-warn/[0.07] px-2 py-1 text-xs leading-snug text-warn">
       <AlertTriangle size={11} className="mt-px shrink-0" />
       <span>{children}</span>
     </p>
@@ -74,13 +74,13 @@ function ElementField({ value, onChange, label }: { value: string; onChange(v: s
   const z = elementBySymbol(value)?.z;
   return (
     <label className="relative block">
-      <div className="mb-0.5 text-[10px] text-slate-500">{label}</div>
+      <div className="mb-0.5 text-2xs text-fg-4">{label}</div>
       <div className="flex gap-1">
         <span className="relative flex-1">
           {z && <span className="absolute top-1/2 left-2 h-2 w-2 -translate-y-1/2 rounded-full" style={{ background: cpkHex(z) }} />}
-          <input className={cx(inputCls, "pl-5", value && !z && "border-rose-500/60")} value={value} onChange={(e) => onChange(normalizeSymbol(e.target.value) ?? e.target.value)} spellCheck={false} />
+          <input className={cx(inputCls, "pl-5", value && !z && "border-bad/60")} value={value} onChange={(e) => onChange(normalizeSymbol(e.target.value) ?? e.target.value)} spellCheck={false} />
         </span>
-        <button type="button" className={cx("rounded-md border border-white/10 px-1.5 text-slate-400 hover:text-cyan-200", open && "text-cyan-300")} onClick={() => setOpen((o) => !o)} title="Periodic table">
+        <button type="button" className={cx("rounded-ctl border border-line px-1.5 text-fg-3 hover:text-fg", open && "text-fg-3")} onClick={() => setOpen((o) => !o)} title="Periodic table">
           <Grid3x3 size={13} />
         </button>
       </div>
@@ -108,7 +108,7 @@ function MatrixInputs({ m, onChange }: { m: IntMatrix; onChange(m: IntMatrix): v
           <input
             key={`${i}${j}`}
             aria-label={`M${i + 1}${j + 1}`}
-            className="w-full rounded border border-white/10 bg-slate-900/80 px-1 py-0.5 text-center font-mono text-[11px] text-slate-100 outline-none focus:border-cyan-400/50"
+            className="w-full rounded-ctl border border-line bg-field px-1 py-0.5 text-center font-mono text-xs text-fg outline-none focus:border-accent"
             value={v}
             inputMode="numeric"
             onChange={(e) => {
@@ -137,30 +137,30 @@ export function SupercellDialog() {
   const sugg = suggestDiagonal(L, n, DEFECT_MIN_DISTANCE, maxAtoms);
   return (
     <Modal title="Make supercell" onClose={close}>
-      <div className="space-y-2.5 text-[11px] text-slate-300">
-        <p className="text-slate-400">
+      <div className="space-y-2.5 text-xs text-fg-2">
+        <p className="text-fg-3">
           L′ = M·L (rows: new lattice vectors in units of a, b, c). Current cell: {n} atoms, shortest periodic distance {d0.toFixed(2)} Å.
         </p>
         <div className="flex flex-wrap items-center gap-1">
-          <span className="text-[10px] text-slate-500">presets</span>
+          <span className="text-2xs text-fg-4">presets</span>
           {SUPERCELL_PRESETS.map((p) => (
-            <Button key={p.id} className="px-2 py-0.5 text-[10.5px]" title={p.title} onClick={() => setM(p.matrix.map((r) => [...r]))}>
+            <Button key={p.id} className="px-2 py-0.5 text-xs" title={p.title} onClick={() => setM(p.matrix.map((r) => [...r]))}>
               {p.label}
             </Button>
           ))}
-          <Button className="px-2 py-0.5 text-[10.5px]" title={`Smallest diagonal cell with every vector ≥ ${DEFECT_MIN_DISTANCE} Å within ${maxAtoms} atoms`} onClick={() => setM(diagonalMatrix(sugg))}>
+          <Button className="px-2 py-0.5 text-xs" title={`Smallest diagonal cell with every vector ≥ ${DEFECT_MIN_DISTANCE} Å within ${maxAtoms} atoms`} onClick={() => setM(diagonalMatrix(sugg))}>
             suggest {sugg.join("×")}
           </Button>
         </div>
         <div className="grid grid-cols-[1fr_1fr] gap-3">
           <div>
-            <div className="mb-0.5 text-[10px] text-slate-500">diagonal n × m × k</div>
+            <div className="mb-0.5 text-2xs text-fg-4">diagonal n × m × k</div>
             <div className="flex gap-1">
               {[0, 1, 2].map((i) => (
                 <input
                   key={i}
                   aria-label={`n${i + 1}`}
-                  className="w-12 rounded border border-white/10 bg-slate-900/80 px-1 py-0.5 text-center font-mono text-[11px] text-slate-100 outline-none"
+                  className="w-12 rounded-ctl border border-line bg-field px-1 py-0.5 text-center font-mono text-xs text-fg outline-none"
                   value={m[i]![i]}
                   inputMode="numeric"
                   onChange={(e) => {
@@ -174,21 +174,21 @@ export function SupercellDialog() {
             </div>
           </div>
           <div>
-            <div className="mb-0.5 text-[10px] text-slate-500">matrix M</div>
+            <div className="mb-0.5 text-2xs text-fg-4">matrix M</div>
             <MatrixInputs m={m} onChange={setM} />
           </div>
         </div>
-        <div className="rounded-md bg-white/[0.03] px-2 py-1 font-mono text-[11px]" data-supercell-preview>
+        <div className="rounded-ctl bg-raised px-2 py-1 font-mono text-xs" data-supercell-preview>
           {pv.valid || pv.tooLarge ? (
             <>
-              det M = {pv.det} → <span className={pv.tooLarge ? "text-rose-300" : "text-slate-100"}>{pv.nAtoms} atoms</span> · shortest periodic distance{" "}
-              <span className={pv.small ? "text-amber-300" : "text-emerald-300"}>{pv.minDistance.toFixed(2)} Å</span>
+              det M = {pv.det} → <span className={pv.tooLarge ? "text-bad" : "text-fg"}>{pv.nAtoms} atoms</span> · shortest periodic distance{" "}
+              <span className={pv.small ? "text-warn" : "text-ok"}>{pv.minDistance.toFixed(2)} Å</span>
             </>
           ) : (
-            <span className="text-rose-300">{pv.error}</span>
+            <span className="text-bad">{pv.error}</span>
           )}
         </div>
-        {pv.tooLarge && <p className="text-[10.5px] text-rose-300">{pv.error}</p>}
+        {pv.tooLarge && <p className="text-xs text-bad">{pv.error}</p>}
         {pv.valid && pv.small && <Warn>Under {DEFECT_MIN_DISTANCE} Å a point defect still interacts noticeably with its periodic images; use a larger cell for formation energies.</Warn>}
         <div className="flex justify-end gap-2">
           <Button onClick={close}>Cancel</Button>
@@ -242,17 +242,17 @@ export function AddAtomDialog() {
   const sel = selected !== null ? crystal.atoms[selected] : null;
   return (
     <Modal title="Add atom (interstitial / adsorbate)" width={440} onClose={close}>
-      <div className="space-y-2.5 text-[11px] text-slate-300">
+      <div className="space-y-2.5 text-xs text-fg-2">
         <div className="grid grid-cols-[110px_1fr] gap-3">
           <ElementField label="element" value={el} onChange={setEl} />
           <div>
-            <div className="mb-0.5 text-[10px] text-slate-500">fractional coordinates (u, v, w)</div>
+            <div className="mb-0.5 text-2xs text-fg-4">fractional coordinates (u, v, w)</div>
             <div className="flex gap-1">
               {[0, 1, 2].map((i) => (
                 <input
                   key={i}
                   aria-label={`frac ${i}`}
-                  className={cx(inputCls, "text-center", !Number.isFinite(f[i]!) && "border-rose-500/60")}
+                  className={cx(inputCls, "text-center", !Number.isFinite(f[i]!) && "border-bad/60")}
                   value={frac[i]}
                   inputMode="decimal"
                   onChange={(e) => {
@@ -272,28 +272,28 @@ export function AddAtomDialog() {
             ["edge centre (½,0,0)", [0.5, 0, 0]],
             ["(¼,¼,¼)", [0.25, 0.25, 0.25]],
           ].map(([label, v]) => (
-            <Button key={label as string} className="px-1.5 py-0.5 text-[10px]" onClick={() => setFrac((v as number[]).map(String) as [string, string, string])}>
+            <Button key={label as string} className="px-1.5 py-0.5 text-2xs" onClick={() => setFrac((v as number[]).map(String) as [string, string, string])}>
               {label as string}
             </Button>
           ))}
           {sel && (
-            <Button className="px-1.5 py-0.5 text-[10px]" title="Start from the selected atom's position (then shift it)" onClick={() => setFrac(sel.frac_coords.map((x) => x.toFixed(4)) as [string, string, string])}>
+            <Button className="px-1.5 py-0.5 text-2xs" title="Start from the selected atom's position (then shift it)" onClick={() => setFrac(sel.frac_coords.map((x) => x.toFixed(4)) as [string, string, string])}>
               at selected #{selected}
             </Button>
           )}
         </div>
-        <div className="rounded-md border border-white/[0.06] bg-white/[0.02] p-1.5" data-pick-viewport>
+        <div className="rounded-ctl border border-line-soft bg-raised p-1.5" data-pick-viewport>
           <div className="flex flex-wrap items-center gap-1.5">
-            <span className="text-[10px] text-slate-500">pick in viewport on the plane</span>
-            <select className="rounded border border-white/10 bg-slate-900/80 px-1 py-0.5 font-mono text-[10.5px] text-slate-100 outline-none" value={axis} onChange={(e) => setAxis(Number(e.target.value) as 0 | 1 | 2)} aria-label="plane normal axis">
+            <span className="text-2xs text-fg-4">pick in viewport on the plane</span>
+            <select className="rounded-ctl border border-line bg-field px-1 py-0.5 font-mono text-xs text-fg outline-none" value={axis} onChange={(e) => setAxis(Number(e.target.value) as 0 | 1 | 2)} aria-label="plane normal axis">
               <option value={0}>u (∥ b,c)</option>
               <option value={1}>v (∥ a,c)</option>
               <option value={2}>w (∥ a,b)</option>
             </select>
-            <span className="font-mono text-[10.5px] text-slate-400">= {Number.isFinite(f[axis]!) ? f[axis]!.toFixed(3) : "—"}</span>
+            <span className="font-mono text-xs text-fg-3">= {Number.isFinite(f[axis]!) ? f[axis]!.toFixed(3) : "—"}</span>
             <Button
               variant="primary"
-              className="ml-auto px-2 py-0.5 text-[10.5px]"
+              className="ml-auto px-2 py-0.5 text-xs"
               disabled={!Number.isFinite(f[axis]!)}
               title="Hide this dialog, then click on the cell plane at this depth (Esc cancels)"
               onClick={() => startPlacement(axis, f[axis]!)}
@@ -301,12 +301,12 @@ export function AddAtomDialog() {
               <MousePointerClick size={11} /> Pick in viewport
             </Button>
           </div>
-          <p className="mt-0.5 text-[10px] leading-snug text-slate-500">
+          <p className="mt-0.5 text-2xs leading-snug text-fg-4">
             The depth is the {"uvw"[axis]} field above; use "at selected" first for a plane through an atom.
           </p>
         </div>
-        <div className="font-mono text-[10.5px] text-slate-400">
-          nearest atom: <span className={dmin < 0.5 ? "text-rose-300" : dmin < 1.2 ? "text-amber-300" : "text-slate-100"}>{Number.isFinite(dmin) ? `${dmin.toFixed(2)} Å` : "—"}</span>
+        <div className="font-mono text-xs text-fg-3">
+          nearest atom: <span className={dmin < 0.5 ? "text-bad" : dmin < 1.2 ? "text-warn" : "text-fg"}>{Number.isFinite(dmin) ? `${dmin.toFixed(2)} Å` : "—"}</span>
           {dmin < 0.5 && " (the server rejects < 0.5 Å)"}
         </div>
         {dmin0 < DEFECT_MIN_DISTANCE && <Warn>The cell's shortest periodic distance is {dmin0.toFixed(1)} Å: the interstitial interacts with its images. Make a supercell first for an isolated defect.</Warn>}
@@ -341,13 +341,13 @@ export function PlacementBar() {
   const h = placement.hover;
   return (
     <div className="pointer-events-none absolute bottom-16 left-1/2 z-40 -translate-x-1/2">
-      <Panel className="pointer-events-auto flex items-center gap-2 px-3 py-1.5" >
-        <MousePointerClick size={13} className="text-cyan-300" />
-        <span className="font-mono text-[11px] text-slate-200" data-placement>
+      <Panel floating className="pointer-events-auto flex items-center gap-2 px-3 py-1.5">
+        <MousePointerClick size={13} className="text-fg-3" />
+        <span className="font-mono text-xs text-fg" data-placement>
           Click on the plane {"uvw"[placement.axis]} = {placement.depth.toFixed(3)} to place {el}
           {h ? ` · (${h.map((x) => x.toFixed(3)).join(", ")})` : ""}
         </span>
-        <Button className="px-2 py-0.5 text-[10.5px]" onClick={cancelPlacement}>
+        <Button className="px-2 py-0.5 text-xs" onClick={cancelPlacement}>
           Cancel
         </Button>
       </Panel>
@@ -379,10 +379,10 @@ export function SubstitutionDialog() {
   const energies = result?.energies_per_atom ?? [];
   return (
     <Modal title="Partial substitution" width={460} onClose={close}>
-      <div className="space-y-2.5 text-[11px] text-slate-300">
+      <div className="space-y-2.5 text-xs text-fg-2">
         <div className="grid grid-cols-2 gap-3">
           <label className="block">
-            <div className="mb-0.5 text-[10px] text-slate-500">replace</div>
+            <div className="mb-0.5 text-2xs text-fg-4">replace</div>
             <select className={inputCls} value={from} onChange={(e) => setFrom(e.target.value)}>
               {els.map((e) => (
                 <option key={e} value={e}>
@@ -394,9 +394,9 @@ export function SubstitutionDialog() {
           <ElementField label="by" value={to} onChange={setTo} />
         </div>
         <label className="block">
-          <div className="mb-1 flex justify-between text-[11px] text-slate-400">
+          <div className="mb-1 flex justify-between text-xs text-fg-3">
             <span>fraction</span>
-            <span className="font-mono text-slate-100 tabular-nums">
+            <span className="font-mono text-fg tabular-nums">
               {(fraction * 100).toFixed(1)} % → {k} of {nFrom} {from} → {to}
             </span>
           </div>
@@ -405,25 +405,25 @@ export function SubstitutionDialog() {
         {k === 0 && <Warn>That rounds to zero atoms in this cell; increase the fraction or make a supercell.</Warn>}
         <div className="grid grid-cols-2 gap-3">
           <label className="block" title="Symmetry-distinct configurations tried (random if there are more); the lowest single-point energy is kept">
-            <div className="mb-0.5 text-[10px] text-slate-500">candidates</div>
+            <div className="mb-0.5 text-2xs text-fg-4">candidates</div>
             <input className={inputCls} inputMode="numeric" value={cands} onChange={(e) => setCands(Math.max(1, Math.min(100, Number.parseInt(e.target.value, 10) || 1)))} />
           </label>
           <label className="block">
-            <div className="mb-0.5 text-[10px] text-slate-500">seed (optional)</div>
+            <div className="mb-0.5 text-2xs text-fg-4">seed (optional)</div>
             <input className={inputCls} inputMode="numeric" placeholder="random" value={seed} onChange={(e) => setSeed(e.target.value.replace(/[^\d]/g, ""))} />
           </label>
         </div>
         {running && <ProgressBar done={progress?.done} total={progress?.total} message={progress?.message ?? "ranking configurations…"} />}
         {result && !running && (
-          <div className="rounded-md border border-emerald-400/25 bg-emerald-400/[0.05] px-2 py-1.5 font-mono text-[10.5px]" data-substitution-result>
-            <div className="text-slate-100">
+          <div className="rounded-ctl border border-ok/25 bg-ok/[0.05] px-2 py-1.5 font-mono text-xs" data-substitution-result>
+            <div className="text-fg">
               {result.n_substituted} {result.from_element} → {result.to_element} · best of {result.n_tried} configurations
             </div>
-            <div className="text-slate-400">
+            <div className="text-fg-3">
               chosen E = {result.chosen_energy_per_atom.toFixed(4)} eV/atom
               {energies.length > 1 && ` · spread ${((energies[energies.length - 1]! - energies[0]!) * 1000).toFixed(1)} meV/atom`}
             </div>
-            <div className="text-slate-500">{result.method}</div>
+            <div className="text-fg-4">{result.method}</div>
           </div>
         )}
         <div className="flex justify-end gap-2">
@@ -469,12 +469,12 @@ export function FormationDialog() {
   const muEls = r ? [...new Set(Object.values(r.chemical_potentials).flatMap((m) => Object.keys(m)))].sort() : [];
   return (
     <Modal title="Defect formation energy" width={560} onClose={close}>
-      <div className="space-y-2.5 text-[11px] text-slate-300">
-        <p className="text-slate-400">
+      <div className="space-y-2.5 text-xs text-fg-2">
+        <p className="text-fg-3">
           E_f = E_defect − E_bulk − Σ Δn_i μ_i for the current structure (the defect cell) against a bulk entry of the history. μ_i from the uMLIP-relaxed Materials Project phases of the chemical system, at each limit of the stability region.
         </p>
         <label className="block">
-          <div className="mb-0.5 text-[10px] text-slate-500">bulk reference (history entry)</div>
+          <div className="mb-0.5 text-2xs text-fg-4">bulk reference (history entry)</div>
           <select className={inputCls} value={bulkPos ?? ""} onChange={(e) => setPick(Number(e.target.value))} disabled={!entries.length}>
             {entries.map((e) => (
               <option key={e.position} value={e.position} disabled={e.position === history?.position}>
@@ -485,33 +485,33 @@ export function FormationDialog() {
           </select>
         </label>
         {bulk && crystal && (
-          <div className="font-mono text-[10.5px] text-slate-400">
+          <div className="font-mono text-xs text-fg-3">
             defect cell: <FormulaText formula={crystal.formula} /> {crystal.atoms.length} at · bulk: <FormulaText formula={bulk.formula} /> {bulk.n_atoms} at
-            {Math.abs(crystal.atoms.length - bulk.n_atoms) > 2 && <span className="text-amber-300"> · atom counts differ by more than a point defect</span>}
+            {Math.abs(crystal.atoms.length - bulk.n_atoms) > 2 && <span className="text-warn"> · atom counts differ by more than a point defect</span>}
           </div>
         )}
         {!entries.length && <Warn>No history entries yet: make the supercell (bulk) first, then create the defect.</Warn>}
         {running && <ProgressBar done={progress?.done} total={progress?.total} message={progress?.message ?? "relaxing reference phases…"} />}
-        {lastError && !running && !r && <p className="text-[10.5px] text-rose-300">{lastError.message}</p>}
+        {lastError && !running && !r && <p className="text-xs text-bad">{lastError.message}</p>}
         {r && (
-          <div className="space-y-1.5 rounded-md border border-white/[0.06] bg-white/[0.02] p-2" data-formation-result>
+          <div className="space-y-1.5 rounded-ctl border border-line-soft bg-raised p-2" data-formation-result>
             <div className="flex flex-wrap items-baseline gap-2">
-              <span className="font-mono text-[15px] text-cyan-100">{r.defect_label}</span>
+              <span className="font-mono text-md text-fg">{r.defect_label}</span>
               {Object.entries(r.delta_n).map(([el, d]) => (
                 <Badge key={el} tone={d < 0 ? "amber" : "cyan"}>
                   Δn({el}) = {d > 0 ? "+" : ""}
                   {d}
                 </Badge>
               ))}
-              {formation!.stateVersion !== stateVersion && <span className="font-mono text-[10px] text-amber-300">stale</span>}
+              {formation!.stateVersion !== stateVersion && <span className="text-2xs text-warn">stale</span>}
               <FallbackTag compact />
             </div>
-            <div className="font-mono text-[10.5px] text-slate-400">
+            <div className="font-mono text-xs text-fg-3">
               E_defect {r.e_defect_ev.toFixed(3)} eV · E_bulk {r.e_bulk_ev.toFixed(3)} eV · defect–image distance{" "}
-              <span className={r.min_image_distance < DEFECT_MIN_DISTANCE ? "text-amber-300" : "text-emerald-300"}>{r.min_image_distance.toFixed(2)} Å</span>
+              <span className={r.min_image_distance < DEFECT_MIN_DISTANCE ? "text-warn" : "text-ok"}>{r.min_image_distance.toFixed(2)} Å</span>
             </div>
-            <table className="w-full font-mono text-[10.5px] tabular-nums">
-              <thead className="text-slate-500">
+            <table className="w-full font-mono text-xs tabular-nums">
+              <thead className="text-fg-4">
                 <tr>
                   <th className="text-left font-normal">limit</th>
                   <th className="text-right font-normal">E_f (eV)</th>
@@ -524,11 +524,11 @@ export function FormationDialog() {
               </thead>
               <tbody>
                 {limits.map((l) => (
-                  <tr key={l} className="border-t border-white/[0.04]">
-                    <td className="text-slate-300">{l}</td>
-                    <td className="text-right text-slate-50">{fx(r.formation_energies_ev[l], 3)}</td>
+                  <tr key={l} className="border-t border-line-soft">
+                    <td className="text-fg-2">{l}</td>
+                    <td className="text-right text-fg">{fx(r.formation_energies_ev[l], 3)}</td>
                     {muEls.map((el) => (
-                      <td key={el} className="text-right text-slate-300">
+                      <td key={el} className="text-right text-fg-2">
                         {fx(r.chemical_potentials[l]?.[el], 3)}
                       </td>
                     ))}
@@ -539,7 +539,7 @@ export function FormationDialog() {
             {r.warnings.map((w) => (
               <Warn key={w}>{w}</Warn>
             ))}
-            <div className="text-[10px] text-slate-500">{r.method}</div>
+            <div className="text-2xs text-fg-4">{r.method}</div>
           </div>
         )}
         <div className="flex justify-end gap-2">
@@ -587,43 +587,43 @@ export function CommitteeDialog() {
   const verdict = r ? committeeVerdict(r) : null;
   return (
     <Modal title="Compare models (committee)" width={600} onClose={close}>
-      <div className="space-y-2.5 text-[11px] text-slate-300">
-        <p className="text-slate-400">Evaluate the current structure with 2–4 models{relax ? " and relax it with each" : ""}. Spread between models is a practical uncertainty estimate. Absolute energies are not comparable across models (different references).</p>
+      <div className="space-y-2.5 text-xs text-fg-2">
+        <p className="text-fg-3">Evaluate the current structure with 2–4 models{relax ? " and relax it with each" : ""}. Spread between models is a practical uncertainty estimate. Absolute energies are not comparable across models (different references).</p>
         {!models ? (
-          <p className={modelsError ? "text-rose-300" : "text-slate-500"}>{modelsError ? `Could not list models: ${modelsError}` : "loading models…"}</p>
+          <p className={modelsError ? "text-bad" : "text-fg-4"}>{modelsError ? `Could not list models: ${modelsError}` : "loading models…"}</p>
         ) : (
           <div className="grid grid-cols-2 gap-1" data-committee-models>
             {list.map((m) => (
-              <label key={m.id} className={cx("flex cursor-pointer items-center gap-1.5 rounded-md border px-2 py-1", chosen.includes(m.id) ? "border-cyan-400/40 bg-cyan-400/10" : "border-white/[0.06]")}>
-                <input type="checkbox" className="accent-cyan-400" checked={chosen.includes(m.id)} onChange={() => toggle(m.id)} />
-                <span className="min-w-0 flex-1 truncate text-slate-100">{m.label}</span>
-                <span className={cx("font-mono text-[9.5px]", m.checkpoint_cached ? "text-slate-500" : "text-amber-300/90")}>{m.checkpoint_cached ? "cached" : "download"}</span>
+              <label key={m.id} className={cx("flex cursor-pointer items-center gap-1.5 rounded-ctl border px-2 py-1", chosen.includes(m.id) ? "border-accent/60 bg-accent-soft" : "border-line-soft")}>
+                <input type="checkbox" className="accent-accent" checked={chosen.includes(m.id)} onChange={() => toggle(m.id)} />
+                <span className="min-w-0 flex-1 truncate text-fg">{m.label}</span>
+                <span className={cx("text-2xs", m.checkpoint_cached ? "text-fg-4" : "text-warn/90")}>{m.checkpoint_cached ? "cached" : "download"}</span>
               </label>
             ))}
           </div>
         )}
         <div className="flex gap-4">
           <label className="flex items-center gap-1.5">
-            <input type="checkbox" className="accent-cyan-400" checked={relax} onChange={(e) => setRelax(e.target.checked)} /> relax with each model (positions + cell)
+            <input type="checkbox" className="accent-accent" checked={relax} onChange={(e) => setRelax(e.target.checked)} /> relax with each model (positions + cell)
           </label>
           <label className="flex items-center gap-1.5">
-            <input type="checkbox" className="accent-cyan-400" checked={d3} onChange={(e) => setD3(e.target.checked)} /> D3 dispersion
+            <input type="checkbox" className="accent-accent" checked={d3} onChange={(e) => setD3(e.target.checked)} /> D3 dispersion
           </label>
         </div>
         {running && <ProgressBar done={progress?.done} total={progress?.total} message={progress?.message ?? "evaluating…"} />}
         {r && verdict && (
           <div className="space-y-1.5" data-committee-result>
             {verdict.disagree ? (
-              <div className="rounded-md border border-rose-500/50 bg-rose-500/10 px-2 py-1 text-[11px] text-rose-200" data-disagree>
+              <div className="rounded-ctl border border-bad/50 bg-bad/10 px-2 py-1 text-xs text-bad" data-disagree>
                 <AlertTriangle size={12} className="mr-1 inline" />
                 Models disagree: {verdict.reasons.join("; ")}.
               </div>
             ) : (
-              <div className="rounded-md border border-emerald-400/30 bg-emerald-400/[0.06] px-2 py-1 text-[11px] text-emerald-200">Models agree (volume spread {verdict.volumeSpreadPct != null ? `${verdict.volumeSpreadPct.toFixed(1)} %` : "n/a"}, same space group).</div>
+              <div className="rounded-ctl border border-ok/30 bg-ok/[0.06] px-2 py-1 text-xs text-ok">Models agree (volume spread {verdict.volumeSpreadPct != null ? `${verdict.volumeSpreadPct.toFixed(1)} %` : "n/a"}, same space group).</div>
             )}
-            {committee!.stateVersion !== stateVersion && <span className="font-mono text-[10px] text-amber-300">structure changed since this comparison (stale)</span>}
-            <table className="w-full font-mono text-[10.5px] tabular-nums">
-              <thead className="text-slate-500">
+            {committee!.stateVersion !== stateVersion && <span className="text-2xs text-warn">structure changed since this comparison (stale)</span>}
+            <table className="w-full font-mono text-xs tabular-nums">
+              <thead className="text-fg-4">
                 <tr>
                   <th className="text-left font-normal">model</th>
                   <th className="text-right font-normal">P (GPa)</th>
@@ -635,28 +635,28 @@ export function CommitteeDialog() {
               </thead>
               <tbody>
                 {r.entries.map((e) => (
-                  <tr key={e.model_id} className="border-t border-white/[0.04]">
-                    <td className="text-slate-100" title={e.backend_name}>
+                  <tr key={e.model_id} className="border-t border-line-soft">
+                    <td className="text-fg" title={e.backend_name}>
                       {e.model_id}
                     </td>
                     <td className="text-right">{fx(e.pressure_gpa, 2)}</td>
                     <td className="text-right">{fx(e.max_force, 3)}</td>
                     <td className="text-right">{fx(e.relaxed_volume_per_atom, 2)}</td>
                     <td className="text-right">{e.relaxed_lattice_abc ? e.relaxed_lattice_abc.map((x) => x.toFixed(3)).join(" / ") : "—"}</td>
-                    <td className={cx("text-right", verdict.spacegroups.length > 1 && "text-rose-300")}>{e.relaxed_spacegroup ?? "—"}</td>
+                    <td className={cx("text-right", verdict.spacegroups.length > 1 && "text-bad")}>{e.relaxed_spacegroup ?? "—"}</td>
                   </tr>
                 ))}
-                <tr className="border-t border-white/10 text-slate-400">
+                <tr className="border-t border-line text-fg-3">
                   <td>spread</td>
                   <td className="text-right">{fx(r.spread.pressure_gpa, 2)}</td>
                   <td className="text-right">{fx(r.spread.max_force, 3)}</td>
-                  <td className={cx("text-right", verdict.volumeSpreadPct != null && verdict.volumeSpreadPct > 3 && "text-rose-300")}>{verdict.volumeSpreadPct != null ? `${verdict.volumeSpreadPct.toFixed(1)} %` : "—"}</td>
+                  <td className={cx("text-right", verdict.volumeSpreadPct != null && verdict.volumeSpreadPct > 3 && "text-bad")}>{verdict.volumeSpreadPct != null ? `${verdict.volumeSpreadPct.toFixed(1)} %` : "—"}</td>
                   <td />
                   <td />
                 </tr>
               </tbody>
             </table>
-            <div className="text-[10px] text-slate-500">{r.method}</div>
+            <div className="text-2xs text-fg-4">{r.method}</div>
           </div>
         )}
         <div className="flex justify-end gap-2">
@@ -708,21 +708,21 @@ export function OrderingDialog() {
   const res = state.result;
   return (
     <Modal title="Ordered approximants" width={540} onClose={close}>
-      <div className="space-y-2.5 text-[11px] text-slate-300">
+      <div className="space-y-2.5 text-xs text-fg-2">
         {!disordered ? (
-          <p className="text-slate-500">No disordered structure pending. Load a partially occupied CIF first.</p>
+          <p className="text-fg-4">No disordered structure pending. Load a partially occupied CIF first.</p>
         ) : (
           <>
-            <p className="text-slate-400">
+            <p className="text-fg-3">
               The structure has partial occupancies ({disordered.message}). Small-cell orderings are enumerated and ranked by uMLIP energy; load one to continue.
             </p>
             <div className="flex items-end gap-2">
               <label className="block w-28">
-                <div className="mb-0.5 text-[10px] text-slate-500">max atoms</div>
+                <div className="mb-0.5 text-2xs text-fg-4">max atoms</div>
                 <input className={inputCls} inputMode="numeric" value={maxAtoms} onChange={(e) => setMaxAtoms(Math.max(1, Math.min(studioMaxAtoms, Number.parseInt(e.target.value, 10) || 1)))} />
               </label>
               <label className="block w-28">
-                <div className="mb-0.5 text-[10px] text-slate-500">candidates</div>
+                <div className="mb-0.5 text-2xs text-fg-4">candidates</div>
                 <input className={inputCls} inputMode="numeric" value={nCand} onChange={(e) => setNCand(Math.max(1, Math.min(50, Number.parseInt(e.target.value, 10) || 1)))} />
               </label>
               <Button disabled={state.status === "busy"} onClick={() => void run()}>
@@ -730,14 +730,14 @@ export function OrderingDialog() {
               </Button>
             </div>
             {state.status === "busy" && <ProgressBar message="enumerating and ranking orderings…" />}
-            {state.status === "error" && <p className="text-[10.5px] text-rose-300">{state.error}</p>}
+            {state.status === "error" && <p className="text-xs text-bad">{state.error}</p>}
             {res && state.status === "ok" && (
               <div data-ordering-result>
-                <div className="mb-1 font-mono text-[10.5px] text-slate-400">
+                <div className="mb-1 font-mono text-xs text-fg-3">
                   <FormulaText formula={res.disordered_formula} /> · {res.n_enumerated} orderings enumerated · {res.method}
                 </div>
-                <table className="w-full font-mono text-[10.5px] tabular-nums">
-                  <thead className="text-slate-500">
+                <table className="w-full font-mono text-xs tabular-nums">
+                  <thead className="text-fg-4">
                     <tr>
                       <th className="text-left font-normal">#</th>
                       <th className="text-left font-normal">formula</th>
@@ -749,17 +749,17 @@ export function OrderingDialog() {
                   </thead>
                   <tbody>
                     {res.candidates.map((c, i) => (
-                      <tr key={i} className="border-t border-white/[0.04]">
-                        <td className="text-slate-500">{i + 1}</td>
-                        <td className="text-slate-100">
+                      <tr key={i} className="border-t border-line-soft">
+                        <td className="text-fg-4">{i + 1}</td>
+                        <td className="text-fg">
                           <FormulaText formula={c.formula} />
                         </td>
                         <td className="text-right">{c.n_atoms}</td>
                         <td className="text-right">{c.spacegroup_symbol}</td>
-                        <td className={cx("text-right", i === 0 ? "text-emerald-300" : "text-slate-200")}>{c.relative_energy_mev_per_atom.toFixed(1)}</td>
+                        <td className={cx("text-right", i === 0 ? "text-ok" : "text-fg")}>{c.relative_energy_mev_per_atom.toFixed(1)}</td>
                         <td className="text-right">
                           <Button
-                            className="px-1.5 py-0 text-[10px]"
+                            className="px-1.5 py-0 text-2xs"
                             disabled={!connected}
                             onClick={() => {
                               if (commands.loadCif(c.cif)) {

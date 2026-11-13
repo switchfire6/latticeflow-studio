@@ -123,9 +123,10 @@ All settings are optional; see [`.env.example`](.env.example).
 | `LATTICEFLOW_MACE_ALLOW_DOWNLOAD` | `1` | `0` = never touch the network (local cache only) |
 | `MP_API_KEY` | – | Materials Project key: hull, MP search/import/match, prototype search, defect chemical potentials |
 | `LATTICEFLOW_HULL_CACHE_DIR` | `~/.cache/latticeflow/hull` | cache of relaxed hull reference phases (per chemical system and model) |
+| `LATTICEFLOW_DATA_DIR` | `~/.latticeflow` | project library and job queue (`library.db`, SQLite) |
 | `LATTICEFLOW_CORS_ORIGINS` | Vite on :5173 | comma-separated allowed origins |
 | `LATTICEFLOW_MAX_ATOMS` | `128` | atoms per structure (load, supercell, add atom, follow instability) |
-| `LATTICEFLOW_PHONON_MAX_ATOMS` | `64` | atoms per cell for the phonon shake-test |
+| `LATTICEFLOW_PHONON_MAX_ATOMS` | `64` | atoms per cell for a phonon calculation |
 | `VITE_BACKEND_URL` (frontend) | – (Vite proxy) | backend URL for the frontend |
 
 Fixed limits: 600 atoms per phonon supercell, 64 atoms per generated candidate, elements up to Z = 89.

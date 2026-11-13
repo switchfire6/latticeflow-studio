@@ -34,23 +34,23 @@ function ToastItem({ t }: { t: Toast }) {
     <div
       role="status"
       className={cx(
-        "pointer-events-auto flex w-[360px] items-start gap-2.5 rounded-xl border bg-slate-950/90 p-3 shadow-[0_10px_40px_rgba(0,0,0,0.5)] backdrop-blur-md",
-        t.level === "error" && "border-rose-500/50",
-        t.level === "warning" && "border-amber-400/45",
-        t.level === "info" && "border-cyan-400/35",
+        "pointer-events-auto flex w-[360px] items-start gap-2.5 rounded-panel border bg-surface p-3 shadow-lg shadow-black/40",
+        t.level === "error" && "border-bad/50",
+        t.level === "warning" && "border-warn/45",
+        t.level === "info" && "border-accent/60",
       )}
     >
       <Icon
         size={16}
-        className={cx("mt-0.5 shrink-0", t.level === "error" ? "text-rose-400" : t.level === "warning" ? "text-amber-300" : "text-cyan-300")}
+        className={cx("mt-0.5 shrink-0", t.level === "error" ? "text-bad" : t.level === "warning" ? "text-warn" : "text-fg-3")}
       />
       <div className="min-w-0 flex-1">
-        <div className="text-[12px] font-semibold text-slate-100">{t.title}</div>
-        <div className="mt-0.5 text-[11.5px] leading-snug break-words text-slate-300">{t.message}</div>
+        <div className="text-sm font-semibold text-fg">{t.title}</div>
+        <div className="mt-0.5 text-sm leading-snug break-words text-fg-2">{t.message}</div>
         {t.action && (
           <button
             type="button"
-            className="mt-1.5 rounded-md border border-cyan-400/40 bg-cyan-400/10 px-2 py-0.5 text-[11px] font-medium text-cyan-100 hover:bg-cyan-400/20"
+            className="mt-1.5 rounded-ctl border border-line-strong bg-raised px-2 py-0.5 text-xs font-medium text-fg hover:bg-hover"
             onClick={() => {
               runAction(t.action!);
               dismiss(t.id);
@@ -60,7 +60,7 @@ function ToastItem({ t }: { t: Toast }) {
           </button>
         )}
       </div>
-      <button type="button" className="text-slate-500 hover:text-slate-200" onClick={() => dismiss(t.id)} aria-label="dismiss">
+      <button type="button" className="text-fg-4 hover:text-fg" onClick={() => dismiss(t.id)} aria-label="dismiss">
         <X size={13} />
       </button>
     </div>

@@ -334,8 +334,8 @@ function AtomBadge({ index }: { index: number }) {
   const el = elementByZ(atom.atomic_number);
   return (
     <Html center zIndexRange={[20, 0]} style={{ pointerEvents: "none" }}>
-      <div className="whitespace-nowrap rounded-md border border-cyan-400/40 bg-slate-950/85 px-2 py-0.5 font-mono text-[11px] text-cyan-100 shadow-[0_0_12px_rgba(34,211,238,0.25)] backdrop-blur">
-        #{index} <span className="font-semibold text-white">{el.symbol}</span> | |F| = {atom.force_norm.toFixed(2)} eV/Å
+      <div className="whitespace-nowrap rounded-ctl border border-line bg-surface px-2 py-0.5 font-mono text-xs text-fg shadow-lg shadow-black/40">
+        #{index} <span className="font-semibold text-fg">{el.symbol}</span> | |F| = {atom.force_norm.toFixed(2)} eV/Å
       </div>
     </Html>
   );

@@ -3,10 +3,11 @@
  * (components/charts/useCanvasChart.ts) that redraws it offscreen at any DPR;
  * a pane's canvases are composited at their on-screen offsets into one image.
  *
- * "Publication" mode puts the figure on white: the dark-theme drawing is
- * transformed per pixel by inverting the HSL lightness (light-grey text and
- * grid become dark grey, saturated series colours keep their hue), then
- * composited over white. Pure pixel maths is unit-tested.
+ * "Publication" mode: the charts are redrawn in the light chart theme (dark
+ * axes and text, the series palette stepped for white; see
+ * components/charts/useCanvasChart.ts) and composited over white.
+ * `invertLightness` is the per-pixel fallback for bitmaps that only exist in
+ * the dark theme (pure pixel maths, unit-tested).
  */
 
 /** In-place HSL lightness inversion L → 1 − L of RGBA pixels (alpha untouched). */
@@ -64,16 +65,20 @@ export interface RenderedChart {
   y: number;
 }
 
-export const DARK_BACKGROUND = "#0b0f19";
+export const DARK_BACKGROUND = "#16191e";
 
-/** Composite rendered charts (each drawn at `dpr`) into one canvas. */
-export function compositeCharts(charts: readonly RenderedChart[], width: number, height: number, dpr: number, publication: boolean): HTMLCanvasElement {
+/**
+ * Composite rendered charts (each drawn at `dpr`) into one canvas. With
+ * `publication` the charts are expected in the light theme already; pass
+ * `invert` only for bitmaps drawn in the dark theme.
+ */
+export function compositeCharts(charts: readonly RenderedChart[], width: number, height: number, dpr: number, publication: boolean, invert = false): HTMLCanvasElement {
   const out = document.createElement("canvas");
   out.width = Math.max(1, Math.round(width * dpr));
   out.height = Math.max(1, Math.round(height * dpr));
   const ctx = out.getContext("2d")!;
   for (const c of charts) ctx.drawImage(c.canvas, Math.round(c.x * dpr), Math.round(c.y * dpr));
-  if (publication) {
+  if (publication && invert) {
     const img = ctx.getImageData(0, 0, out.width, out.height);
     invertLightness(img.data);
     ctx.putImageData(img, 0, 0);

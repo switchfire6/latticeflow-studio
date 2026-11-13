@@ -7,7 +7,7 @@
  * representations with IR / Raman / silent / acoustic badges; a row selects
  * that Γ mode.
  */
-import { BarChart3, Loader2, Pause, Play, Snowflake } from "lucide-react";
+import { BarChart3, GitBranch, Loader2, Pause, Play } from "lucide-react";
 import { useState } from "react";
 import { showPane } from "../../services/dockActions";
 import { canFollow, followSelectedInstability, selectModeAt } from "../../services/phononActions";
@@ -21,11 +21,11 @@ import type { FrequencyUnit } from "../../utils/units";
 import { Button, Segmented, Slider, cx } from "./ui";
 
 const BADGE_CLS: Record<IrrepBadge, string> = {
-  acoustic: "border-white/10 text-slate-400",
-  IR: "border-rose-400/40 text-rose-200",
-  Raman: "border-emerald-400/40 text-emerald-200",
-  silent: "border-white/10 text-slate-500",
-  unknown: "border-white/10 text-slate-600",
+  acoustic: "border-line text-fg-3",
+  IR: "border-bad/40 text-bad",
+  Raman: "border-ok/40 text-ok",
+  silent: "border-line text-fg-4",
+  unknown: "border-line text-fg-5",
 };
 
 export function GammaIrrepList({
@@ -51,15 +51,15 @@ export function GammaIrrepList({
             aria-selected={sel}
             onClick={() => m.band_indices.length && onSelect(m.band_indices[0]!)}
             title={`bands ${m.band_indices.join(", ")} (degeneracy ${m.band_indices.length})`}
-            className={cx("flex w-full items-center gap-1.5 px-2 py-[3px] font-mono text-[10.5px]", sel ? "bg-cyan-400/15 text-cyan-100" : "text-slate-300 hover:bg-white/5")}
+            className={cx("flex w-full items-center gap-1.5 px-2 py-[3px] font-mono text-xs", sel ? "bg-accent-soft text-accent-fg" : "text-fg-2 hover:bg-hover")}
           >
             <span className="w-11 shrink-0 text-left">{formatIrrep(m.label)}</span>
-            <span className={cx("w-[72px] shrink-0 text-right tabular-nums", classifyFrequency(m.frequency_thz) === "imaginary" && "text-rose-300")}>
+            <span className={cx("w-[72px] shrink-0 text-right tabular-nums", classifyFrequency(m.frequency_thz) === "imaginary" && "text-bad")}>
               {formatFrequency(m.frequency_thz, unit, 2)}
             </span>
             <span className="flex flex-1 justify-end gap-0.5">
               {irrepBadges(m).map((b) => (
-                <span key={b} className={cx("rounded border px-1 text-[9px] leading-[14px]", BADGE_CLS[b])}>
+                <span key={b} className={cx("rounded-ctl border px-1 text-2xs leading-[14px]", BADGE_CLS[b])}>
                   {b === "unknown" ? "?" : b}
                 </span>
               ))}
@@ -98,15 +98,15 @@ export function PhononControlBar() {
   const pending = selection && (!loaded || loaded.q_index !== selection.qIndex || loaded.band_index !== selection.band);
 
   return (
-    <div className="flex h-full w-[270px] shrink-0 flex-col gap-1.5 overflow-y-auto border-r border-white/[0.06] pr-3">
+    <div className="flex h-full w-[270px] shrink-0 flex-col gap-1.5 overflow-y-auto border-r border-line-soft pr-3">
       <div className="flex items-center justify-between">
-        <span className="font-mono text-[11px] text-slate-300">
-          {qLabel} <span className="text-slate-500">· {freqs.length} modes</span>
+        <span className="font-mono text-xs text-fg-2">
+          {qLabel} <span className="text-fg-4">· {freqs.length} modes</span>
         </span>
         <button
           type="button"
           title={playing ? "Pause the animation" : "Play the animation"}
-          className="flex items-center gap-1 rounded-md border border-white/10 px-1.5 py-0.5 text-[10px] text-slate-300 hover:border-cyan-400/50"
+          className="flex items-center gap-1 rounded-ctl px-1.5 py-0.5 text-xs text-fg-2 hover:bg-hover hover:text-fg"
           onClick={() => {
             st.setPhononPlaying(!playing);
             if (toolMode !== "PHONON_SHAKE") st.setToolMode("PHONON_SHAKE");
@@ -125,7 +125,7 @@ export function PhononControlBar() {
           onChange={setTab}
         />
       )}
-      <div className="min-h-[92px] flex-1 shrink-0 overflow-y-auto rounded-md border border-white/[0.06] bg-black/20" role="listbox" aria-label="modes at q">
+      <div className="min-h-[92px] flex-1 shrink-0 overflow-y-auto rounded-ctl border border-line-soft bg-field" role="listbox" aria-label="modes at q">
         {showIrreps && (
           <GammaIrrepList
             modes={phonon.gamma_modes!}
@@ -145,12 +145,12 @@ export function PhononControlBar() {
               aria-selected={sel}
               onClick={() => selectModeAt(q, b)}
               className={cx(
-                "flex w-full items-center justify-between px-2 py-[3px] font-mono text-[10.5px]",
-                sel ? "bg-cyan-400/15 text-cyan-100" : "text-slate-300 hover:bg-white/5",
+                "flex w-full items-center justify-between px-2 py-[3px] font-mono text-xs",
+                sel ? "bg-accent-soft text-accent-fg" : "text-fg-2 hover:bg-hover",
               )}
             >
               <span>ν{b}</span>
-              <span className={cx(cls === "imaginary" && "text-rose-300", cls === "zero" && "text-slate-500")}>
+              <span className={cx(cls === "imaginary" && "text-bad", cls === "zero" && "text-fg-4")}>
                 {cls === "imaginary" && "⚠ "}
                 {formatFrequency(f, unit, 3)}{cls === "imaginary" ? " (i)" : ""}
               </span>
@@ -159,10 +159,10 @@ export function PhononControlBar() {
         })}
       </div>
       <div className="flex items-center gap-2">
-        <label className="flex items-center gap-1 text-[10.5px] text-slate-400" title="Maximum displacement of the frozen-in mode (Å)">
+        <label className="flex items-center gap-1 text-xs text-fg-3" title="Maximum displacement of the frozen-in mode (Å)">
           amp
           <input
-            className="w-14 rounded border border-white/10 bg-slate-900/80 px-1 py-0.5 font-mono text-[11px] text-slate-100 outline-none focus:border-cyan-400/50"
+            className="w-14 rounded-ctl border border-line bg-field px-1 py-0.5 font-mono text-xs text-fg outline-none focus:border-accent"
             value={amplitude}
             inputMode="decimal"
             onChange={(e) => setAmplitude(e.target.value)}
@@ -170,12 +170,12 @@ export function PhononControlBar() {
           Å
         </label>
         <Button
-          variant="danger"
-          className="flex-1 px-2 py-1 text-[10.5px] leading-tight"
+          variant="primary"
+          className="flex-1 px-2 py-1 text-xs leading-tight"
           disabled={!followable || !ampOk}
           title={
             !loaded?.is_imaginary
-              ? "Select an imaginary (crimson) mode first"
+              ? "Select an imaginary (red) mode first"
               : pending
                 ? "Waiting for the eigenvector…"
                 : !ampOk
@@ -184,12 +184,12 @@ export function PhononControlBar() {
           }
           onClick={() => followSelectedInstability(amp)}
         >
-          <Snowflake size={12} /> Freeze &amp; Relax Imaginary Mode (Follow Instability)
+          <GitBranch size={12} /> Follow instability
         </Button>
       </div>
       <button
         type="button"
-        className="flex items-center justify-center gap-1.5 rounded-md border border-white/10 bg-white/[0.03] px-2 py-1 text-[10.5px] text-slate-300 hover:border-cyan-400/40 hover:text-cyan-100"
+        className="flex items-center justify-center gap-1.5 rounded-ctl border border-line bg-raised px-2 py-1 text-xs text-fg-2 hover:border-line-strong hover:text-fg"
         title="Phonon density of states, F(T), S(T), C_v(T) and the zero-point energy"
         onClick={() => {
           if (!hasDos && !dosPending) commands.requestDos();

@@ -7,6 +7,7 @@
  * committed structures (services/localActions.ts); stale while the structure
  * moves (drag / streams).
  */
+import { SERIES_COLORS } from "../../utils/chartData";
 import { Loader2, RefreshCw } from "lucide-react";
 import { useMemo, useState } from "react";
 import { commands } from "../../services/wsClient";
@@ -15,7 +16,7 @@ import { bvsTone, giiVerdict, glazerDisplay, partialPairs } from "../../utils/lo
 import { LineChart, type LineSeries } from "../charts/LineChart";
 import { Badge, Button, Segmented, cx } from "./ui";
 
-export const SERIES_COLORS = ["#22d3ee", "#f5a524", "#a78bfa", "#34d399", "#f472b6", "#60a5fa", "#facc15", "#fb7185", "#94a3b8", "#2dd4bf"];
+export { SERIES_COLORS };
 
 type Tab = "rdf" | "sites" | "polyhedra";
 const f = (v: number | null | undefined, d = 2) => (v == null || !Number.isFinite(v) ? "—" : v.toFixed(d));
@@ -29,23 +30,23 @@ function TiltReadout({ la }: { la: LocalAnalysisState }) {
     <div className="flex min-w-0 items-center gap-3">
       {t ? (
         <>
-          <span className="font-serif text-[20px] leading-none text-cyan-100 italic" title={`Glazer tilt system ${t.glazer ?? "(undetermined)"} · ${t.method}`} data-glazer>
+          <span className="font-serif text-md leading-none text-fg italic" title={`Glazer tilt system ${t.glazer ?? "(undetermined)"} · ${t.method}`} data-glazer>
             {glazerDisplay(t.glazer)}
           </span>
-          <span className="font-mono text-[10.5px] text-slate-300 tabular-nums" title="Rotation of the BX₆ octahedra about the pseudo-cubic a, b, c axes (phase: + in-phase, − anti-phase)">
+          <span className="font-mono text-xs text-fg-2 tabular-nums" title="Rotation of the BX₆ octahedra about the pseudo-cubic a, b, c axes (phase: + in-phase, − anti-phase)">
             {["a", "b", "c"].map((ax, i) => (
               <span key={ax} className="mr-2">
-                φ<sub>{ax}</sub> {f(t.tilt_angles_deg[i], 1)}°<span className="text-slate-500">{t.phases[i] === "0" ? "" : t.phases[i]}</span>
+                φ<sub>{ax}</sub> {f(t.tilt_angles_deg[i], 1)}°<span className="text-fg-4">{t.phases[i] === "0" ? "" : t.phases[i]}</span>
               </span>
             ))}
           </span>
         </>
       ) : (
-        <span className="font-mono text-[10.5px] text-slate-500" title="Tilts are analysed for corner-sharing BX₆ (perovskite-like) networks only">no octahedral tilt network</span>
+        <span className="text-xs text-fg-4" title="Tilts are analysed for corner-sharing BX₆ (perovskite-like) networks only">no octahedral tilt network</span>
       )}
-      <span className="ml-auto flex shrink-0 items-center gap-1 font-mono text-[10.5px]" title="Global instability index √⟨(BVS − |V|)²⟩ in valence units: < 0.1 unstrained, ~0.2 typical, > 0.2 strained / possibly unstable">
-        <span className="text-slate-500">GII</span>
-        <span className="text-slate-100 tabular-nums">{f(gii, 3)} v.u.</span>
+      <span className="ml-auto flex shrink-0 items-center gap-1 font-mono text-xs" title="Global instability index √⟨(BVS − |V|)²⟩ in valence units: < 0.1 unstrained, ~0.2 typical, > 0.2 strained / possibly unstable">
+        <span className="text-fg-4">GII</span>
+        <span className="text-fg tabular-nums">{f(gii, 3)} v.u.</span>
         <Badge tone={gv.tone}>{gv.text}</Badge>
       </span>
     </div>
@@ -60,7 +61,7 @@ function PartialRdf({ la }: { la: LocalAnalysisState }) {
     .map((p, i) => ({ p, i }))
     .filter(({ p }) => !off.includes(p))
     .map(({ p, i }) => ({ label: `g ${p}`, xs: r, ys: la.data.partial_rdf![p]!, color: SERIES_COLORS[i % SERIES_COLORS.length]!, width: 1.6 }));
-  if (!pairs.length) return <div className="grid h-full w-full place-items-center text-[11px] text-slate-500">No partial g(r) in this analysis.</div>;
+  if (!pairs.length) return <div className="grid h-full w-full place-items-center text-xs text-fg-4">No partial g(r) in this analysis.</div>;
   return (
     <div className="flex h-full w-full min-w-0 gap-2">
       <div className="flex w-[74px] shrink-0 flex-col gap-0.5 overflow-y-auto" data-pairs>
@@ -69,10 +70,10 @@ function PartialRdf({ la }: { la: LocalAnalysisState }) {
             key={p}
             type="button"
             onClick={() => setOff(off.includes(p) ? off.filter((x) => x !== p) : [...off, p])}
-            className={cx("flex items-center gap-1 rounded px-1 py-0.5 text-left font-mono text-[10px]", off.includes(p) ? "text-slate-600" : "bg-white/[0.04] text-slate-200")}
+            className={cx("flex items-center gap-1 rounded-ctl px-1 py-0.5 text-left font-mono text-2xs", off.includes(p) ? "text-fg-5" : "bg-raised text-fg")}
             aria-pressed={!off.includes(p)}
           >
-            <span className="h-[2px] w-2.5 shrink-0 rounded" style={{ background: off.includes(p) ? "#334155" : SERIES_COLORS[i % SERIES_COLORS.length] }} />
+            <span className="h-[2px] w-2.5 shrink-0 rounded-ctl" style={{ background: off.includes(p) ? "#3e444d" : SERIES_COLORS[i % SERIES_COLORS.length] }} />
             {p}
           </button>
         ))}
@@ -87,8 +88,8 @@ function PartialRdf({ la }: { la: LocalAnalysisState }) {
 function SiteTable({ la }: { la: LocalAnalysisState }) {
   return (
     <div className="h-full w-full overflow-auto">
-      <table className="w-full font-mono text-[10.5px] tabular-nums" data-sites>
-        <thead className="sticky top-0 bg-slate-950 text-slate-500">
+      <table className="w-full font-mono text-xs tabular-nums" data-sites>
+        <thead className="sticky top-0 bg-surface text-fg-4">
           <tr>
             <th className="px-1 text-left font-normal">#</th>
             <th className="px-1 text-left font-normal">el</th>
@@ -105,14 +106,14 @@ function SiteTable({ la }: { la: LocalAnalysisState }) {
             const dev = s.bond_valence_sum != null && s.oxidation_state != null ? Math.abs(s.bond_valence_sum) - Math.abs(s.oxidation_state) : null;
             const nb = [...s.neighbors].sort((a, b) => a.distance - b.distance);
             return (
-              <tr key={s.index} className="border-t border-white/[0.03] hover:bg-white/[0.03]" onMouseEnter={() => useCrystalStore.getState().setHoveredAtom(s.index)} onMouseLeave={() => useCrystalStore.getState().setHoveredAtom(null)}>
-                <td className="px-1 text-slate-500">{s.index}</td>
-                <td className="px-1 text-slate-100">{s.element}</td>
-                <td className="px-1 text-right text-slate-200">{s.coordination_number}</td>
-                <td className="px-1 text-right text-slate-300">{s.oxidation_state == null ? "—" : signed(s.oxidation_state, 0)}</td>
-                <td className="px-1 text-right text-slate-100">{f(s.bond_valence_sum)}</td>
-                <td className={cx("px-1 text-right", tone === "ok" ? "text-emerald-300" : tone === "warn" ? "text-amber-300" : tone === "bad" ? "text-rose-300" : "text-slate-600")}>{signed(dev)}</td>
-                <td className="max-w-[260px] truncate px-1 text-slate-400" title={nb.map((n) => `${n.element}${n.index} ${n.distance.toFixed(3)}`).join(", ")}>
+              <tr key={s.index} className="border-t border-line-soft hover:bg-hover" onMouseEnter={() => useCrystalStore.getState().setHoveredAtom(s.index)} onMouseLeave={() => useCrystalStore.getState().setHoveredAtom(null)}>
+                <td className="px-1 text-fg-4">{s.index}</td>
+                <td className="px-1 text-fg">{s.element}</td>
+                <td className="px-1 text-right text-fg">{s.coordination_number}</td>
+                <td className="px-1 text-right text-fg-2">{s.oxidation_state == null ? "—" : signed(s.oxidation_state, 0)}</td>
+                <td className="px-1 text-right text-fg">{f(s.bond_valence_sum)}</td>
+                <td className={cx("px-1 text-right", tone === "ok" ? "text-ok" : tone === "warn" ? "text-warn" : tone === "bad" ? "text-bad" : "text-fg-5")}>{signed(dev)}</td>
+                <td className="max-w-[260px] truncate px-1 text-fg-3" title={nb.map((n) => `${n.element}${n.index} ${n.distance.toFixed(3)}`).join(", ")}>
                   {nb
                     .slice(0, 6)
                     .map((n) => `${n.element} ${n.distance.toFixed(2)}`)
@@ -130,11 +131,11 @@ function SiteTable({ la }: { la: LocalAnalysisState }) {
 
 function PolyhedraTable({ la }: { la: LocalAnalysisState }) {
   const polyhedra = la.data.polyhedra;
-  if (!polyhedra.length) return <div className="grid h-full w-full place-items-center text-[11px] text-slate-500">No coordination polyhedra found.</div>;
+  if (!polyhedra.length) return <div className="grid h-full w-full place-items-center text-xs text-fg-4">No coordination polyhedra found.</div>;
   return (
     <div className="h-full w-full overflow-auto">
-      <table className="w-full font-mono text-[10.5px] tabular-nums" data-polyhedra>
-        <thead className="sticky top-0 bg-slate-950 text-slate-500">
+      <table className="w-full font-mono text-xs tabular-nums" data-polyhedra>
+        <thead className="sticky top-0 bg-surface text-fg-4">
           <tr>
             <th className="px-1 text-left font-normal">centre</th>
             <th className="px-1 text-left font-normal">shape</th>
@@ -146,16 +147,16 @@ function PolyhedraTable({ la }: { la: LocalAnalysisState }) {
         </thead>
         <tbody>
           {polyhedra.map((p) => (
-            <tr key={p.center_index} className="border-t border-white/[0.03] hover:bg-white/[0.03]" onMouseEnter={() => useCrystalStore.getState().setHoveredAtom(p.center_index)} onMouseLeave={() => useCrystalStore.getState().setHoveredAtom(null)}>
-              <td className="px-1 text-slate-100">
+            <tr key={p.center_index} className="border-t border-line-soft hover:bg-hover" onMouseEnter={() => useCrystalStore.getState().setHoveredAtom(p.center_index)} onMouseLeave={() => useCrystalStore.getState().setHoveredAtom(null)}>
+              <td className="px-1 text-fg">
                 {p.center_element}
-                <span className="text-slate-500">{p.center_index}</span>
+                <span className="text-fg-4">{p.center_index}</span>
               </td>
-              <td className="px-1 text-slate-300">{p.shape}</td>
-              <td className="px-1 text-right text-slate-200">{p.ligand_indices.length}</td>
-              <td className="px-1 text-right text-slate-100">{f(p.mean_bond_length, 3)}</td>
-              <td className={cx("px-1 text-right", p.bond_length_distortion > 0.02 ? "text-amber-300" : "text-slate-200")}>{f(p.bond_length_distortion, 4)}</td>
-              <td className={cx("px-1 text-right", p.quadratic_elongation != null && p.quadratic_elongation > 1.01 ? "text-amber-300" : "text-slate-200")}>{f(p.quadratic_elongation, 4)}</td>
+              <td className="px-1 text-fg-2">{p.shape}</td>
+              <td className="px-1 text-right text-fg">{p.ligand_indices.length}</td>
+              <td className="px-1 text-right text-fg">{f(p.mean_bond_length, 3)}</td>
+              <td className={cx("px-1 text-right", p.bond_length_distortion > 0.02 ? "text-warn" : "text-fg")}>{f(p.bond_length_distortion, 4)}</td>
+              <td className={cx("px-1 text-right", p.quadratic_elongation != null && p.quadratic_elongation > 1.01 ? "text-warn" : "text-fg")}>{f(p.quadratic_elongation, 4)}</td>
             </tr>
           ))}
         </tbody>
@@ -173,7 +174,7 @@ export function LocalStructureView({ la, stale, pending, canRefresh, onRefresh }
   return (
     <div className="flex h-full w-full min-w-0 flex-col gap-1.5" data-local-pane>
       <div className="flex shrink-0 items-center gap-2">
-        {la ? <TiltReadout la={la} /> : <span className="flex-1 text-[11px] text-slate-500">{pending ? "analysing…" : "Partial g(r), bond valence, polyhedra and octahedral tilts of the current structure."}</span>}
+        {la ? <TiltReadout la={la} /> : <span className="flex-1 text-xs text-fg-4">{pending ? "analysing…" : "Partial g(r), bond valence, polyhedra and octahedral tilts of the current structure."}</span>}
       </div>
       <div className="flex shrink-0 items-center gap-2">
         <Segmented<Tab>
@@ -185,10 +186,10 @@ export function LocalStructureView({ la, stale, pending, canRefresh, onRefresh }
           ]}
           onChange={setTab}
         />
-        {stale && la && <span className="font-mono text-[10px] text-amber-300/80">structure changed · refreshes when it settles</span>}
+        {stale && la && <span className="text-2xs text-warn/80">structure changed · refreshes when it settles</span>}
         <span className="ml-auto flex items-center gap-1.5">
-          {la && <span className="max-w-[220px] truncate font-mono text-[9.5px] text-slate-600" title={la.data.method}>{la.data.method}</span>}
-          <Button className="px-1.5 py-0.5 text-[10.5px]" disabled={!canRefresh || pending} onClick={onRefresh} title="Re-run REQUEST_LOCAL_ANALYSIS now">
+          {la && <span className="max-w-[220px] truncate text-2xs text-fg-5" title={la.data.method}>{la.data.method}</span>}
+          <Button className="px-1.5 py-0.5 text-xs" disabled={!canRefresh || pending} onClick={onRefresh} title="Re-run REQUEST_LOCAL_ANALYSIS now">
             {pending ? <Loader2 size={11} className="animate-spin" /> : <RefreshCw size={11} />} {la ? "Refresh" : "Analyse"}
           </Button>
         </span>

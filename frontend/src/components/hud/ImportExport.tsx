@@ -49,7 +49,7 @@ export function loadFile(file: File): Promise<StructureTextFormat | null> {
 function Field({ label, children }: { label: string; children: ReactNode }) {
   return (
     <label className="block">
-      <div className="mb-0.5 text-[10px] text-slate-500">{label}</div>
+      <div className="mb-0.5 text-2xs text-fg-4">{label}</div>
       {children}
     </label>
   );
@@ -63,11 +63,11 @@ export function PasteStructureDialog({ onClose }: { onClose(): void }) {
     if (importStructureText(text, format, (t, f) => commands.loadText(t, f))) onClose();
   };
   return createPortal(
-    <div className="fixed inset-0 z-[100] grid place-items-center bg-black/50 backdrop-blur-[2px]" onMouseDown={(e) => e.target === e.currentTarget && onClose()}>
-      <Panel className="w-[560px] max-w-[calc(100vw-32px)] p-4">
+    <div className="fixed inset-0 z-[100] grid place-items-center bg-black/50" onMouseDown={(e) => e.target === e.currentTarget && onClose()}>
+      <Panel floating className="w-[560px] max-w-[calc(100vw-32px)] p-4">
         <div className="mb-2 flex items-center justify-between">
-          <span className="text-[10px] font-semibold tracking-[0.18em] text-slate-400 uppercase">Paste structure</span>
-          <button type="button" onClick={onClose} className="text-slate-500 hover:text-slate-200" aria-label="close">
+          <span className="text-2xs font-semibold tracking-[0.06em] text-fg-3 uppercase">Paste structure</span>
+          <button type="button" onClick={onClose} className="text-fg-4 hover:text-fg" aria-label="close">
             <X size={14} />
           </button>
         </div>
@@ -81,7 +81,7 @@ export function PasteStructureDialog({ onClose }: { onClose(): void }) {
           }}
           spellCheck={false}
           placeholder={"data_SrTiO3\n_cell_length_a 3.905\n…\n\nor a POSCAR / extxyz block"}
-          className="h-64 w-full resize-none rounded-lg border border-white/10 bg-slate-900/80 p-2 font-mono text-[11px] text-slate-100 outline-none focus:border-cyan-400/50"
+          className="h-64 w-full resize-none rounded-ctl border border-line bg-field p-2 font-mono text-xs text-fg outline-none focus:border-accent"
         />
         <div className="mt-2 flex items-center gap-2">
           <select className={cx(inputCls, "w-48")} value={format} onChange={(e) => setFormat(e.target.value as StructureTextFormat)}>
@@ -91,7 +91,7 @@ export function PasteStructureDialog({ onClose }: { onClose(): void }) {
               </option>
             ))}
           </select>
-          <span className="flex-1 text-[10px] text-slate-500">Ctrl+Enter to load</span>
+          <span className="flex-1 text-2xs text-fg-4">Ctrl+Enter to load</span>
           <Button variant="ghost" onClick={onClose}>
             Cancel
           </Button>
@@ -172,7 +172,7 @@ export function SymmetryExportCard() {
             </select>
           </Field>
           <Field label="symprec (Å)">
-            <input className={cx(inputCls, !spOk && "border-rose-500/60")} value={symprec} inputMode="decimal" onChange={(e) => setSymprec(e.target.value)} />
+            <input className={cx(inputCls, !spOk && "border-bad/60")} value={symprec} inputMode="decimal" onChange={(e) => setSymprec(e.target.value)} />
           </Field>
         </div>
         <Button
@@ -184,7 +184,7 @@ export function SymmetryExportCard() {
           <Sparkles size={12} /> Refine symmetry
         </Button>
 
-        <div className="grid grid-cols-2 gap-2 border-t border-white/[0.06] pt-2.5">
+        <div className="grid grid-cols-2 gap-2 border-t border-line-soft pt-2.5">
           <Field label="Export format">
             <select className={inputCls} value={choice} onChange={(e) => setChoice(e.target.value as ExportChoice)}>
               {EXPORT_CHOICES.map((c) => (
@@ -250,11 +250,11 @@ export function ViewportDropZone({ children }: { children: ReactNode }) {
     >
       {children}
       {over && (
-        <div className="pointer-events-none absolute inset-3 z-50 grid place-items-center rounded-2xl border-2 border-dashed border-cyan-400/60 bg-cyan-400/[0.06]">
-          <div className="rounded-xl bg-slate-950/85 px-4 py-3 text-center">
-            <FileUp size={20} className="mx-auto mb-1 text-cyan-300" />
-            <div className="text-[13px] font-semibold text-slate-100">Drop to load the structure</div>
-            <div className="font-mono text-[10.5px] text-slate-400">CIF · POSCAR / CONTCAR · extxyz</div>
+        <div className="pointer-events-none absolute inset-3 z-50 grid place-items-center rounded-panel border-2 border-dashed border-accent/60 bg-accent-soft">
+          <div className="rounded-panel bg-surface px-4 py-3 text-center">
+            <FileUp size={20} className="mx-auto mb-1 text-fg-3" />
+            <div className="text-md font-semibold text-fg">Drop to load the structure</div>
+            <div className="text-xs text-fg-3">CIF · POSCAR / CONTCAR · extxyz</div>
           </div>
         </div>
       )}

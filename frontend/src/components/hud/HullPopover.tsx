@@ -25,10 +25,10 @@ export function HullPopoverView({
   onClose(): void;
 }) {
   return (
-    <div className="w-[340px] rounded-xl border border-white/10 bg-slate-950/95 p-3 text-[11.5px] text-slate-300 shadow-[0_12px_48px_rgba(0,0,0,0.6)] backdrop-blur-md" data-hull-status={hull.status}>
+    <div className="w-[340px] rounded-panel border border-line bg-surface p-3 text-sm text-fg-2 shadow-lg shadow-black/40" data-hull-status={hull.status}>
       <div className="mb-2 flex items-center justify-between">
-        <span className="text-[10px] font-semibold tracking-[0.18em] text-slate-400 uppercase">Energy above hull (uMLIP)</span>
-        <button type="button" onClick={onClose} className="text-slate-500 hover:text-slate-200" aria-label="close">
+        <span className="text-2xs font-semibold tracking-[0.06em] text-fg-3 uppercase">Energy above hull (uMLIP)</span>
+        <button type="button" onClick={onClose} className="text-fg-4 hover:text-fg" aria-label="close">
           <X size={13} />
         </button>
       </div>
@@ -36,44 +36,44 @@ export function HullPopoverView({
         <p>Builds the convex hull of the chemical system from Materials Project reference phases, all re-relaxed with the studio's uMLIP; the candidate is relaxed the same way before scoring.</p>
       )}
       {hull.status === "busy" && (
-        <p className="flex items-center gap-2 text-cyan-200">
+        <p className="flex items-center gap-2 text-fg-2">
           <Loader2 size={13} className="animate-spin" /> Evaluating… {Math.max(0, Math.round((now - hull.startedAt) / 1000))} s (a cold hull relaxes up to 40 references and can take minutes)
         </p>
       )}
       {hull.status === "unavailable" && (
-        <p className="text-amber-300">
+        <p className="text-warn">
           <span className="font-semibold">Hull lookup unavailable.</span> {hull.message}
         </p>
       )}
       {hull.status === "error" && (
-        <p className="text-rose-300">
+        <p className="text-bad">
           <span className="font-semibold">{hull.code}:</span> {hull.message}
         </p>
       )}
       {hull.status === "ok" && (
         <div className="space-y-2">
           <div className="flex items-baseline justify-between font-mono">
-            <span className="text-slate-400">{hull.result.chemsys}</span>
-            <span className={cx("text-[15px] font-semibold", hull.result.e_hull_ev <= 0.025 ? "text-emerald-300" : "text-amber-300")}>
+            <span className="text-fg-3">{hull.result.chemsys}</span>
+            <span className={cx("text-md font-semibold", hull.result.e_hull_ev <= 0.025 ? "text-ok" : "text-warn")}>
               {hull.result.e_hull_ev.toFixed(3)} eV/atom
             </span>
           </div>
-          {stale && <p className="text-[10.5px] text-amber-300/80">The structure changed since this evaluation; re-run for the current one.</p>}
+          {stale && <p className="text-xs text-warn/80">The structure changed since this evaluation; re-run for the current one.</p>}
           <FallbackTag />
           {hull.result.candidate_relaxed !== undefined && (
-            <div className="flex items-baseline justify-between font-mono text-[10.5px]" data-hull-relaxed>
-              <span className={hull.result.candidate_relaxed ? "text-emerald-300/90" : "text-amber-300/90"}>
+            <div className="flex items-baseline justify-between font-mono text-xs" data-hull-relaxed>
+              <span className={hull.result.candidate_relaxed ? "text-ok/90" : "text-warn/90"}>
                 {hull.result.candidate_relaxed ? "candidate relaxed" : "candidate scored as given"}
               </span>
-              <span className="text-slate-400">
+              <span className="text-fg-3">
                 E {hull.result.energy_per_atom.toFixed(3)}
                 {hull.result.energy_per_atom_as_given != null && ` (as given ${hull.result.energy_per_atom_as_given.toFixed(3)})`} eV/atom
               </span>
             </div>
           )}
           <div>
-            <div className="mb-1 text-[10px] tracking-wider text-slate-500 uppercase">Decomposition</div>
-            <ul className="space-y-0.5 font-mono text-[11px]">
+            <div className="mb-1 text-xs font-medium text-fg-3">Decomposition</div>
+            <ul className="space-y-0.5 font-mono text-xs">
               {Object.entries(hull.result.decomposition).map(([formula, frac]) => (
                 <li key={formula} className="flex justify-between">
                   <FormulaText formula={formula} />
@@ -82,11 +82,11 @@ export function HullPopoverView({
               ))}
             </ul>
           </div>
-          <div className="font-mono text-[10.5px] text-slate-400">
+          <div className="font-mono text-xs text-fg-3">
             {hull.result.references.length} reference phase{hull.result.references.length === 1 ? "" : "s"} · {hull.result.umlip_backend}
             {hull.result.formation_energy_per_atom != null && ` · E_form ${hull.result.formation_energy_per_atom.toFixed(3)} eV/atom`}
           </div>
-          <p className="text-[10.5px] leading-snug text-slate-500">
+          <p className="text-xs leading-snug text-fg-4">
             {hull.result.method}
             {hull.result.candidate_relaxed && !/relax/i.test(hull.result.method) ? " · candidate relaxed (FIRE + cell) before scoring" : ""}
           </p>
@@ -123,9 +123,9 @@ export function HullControl() {
           setOpen(true);
           if (hull.status === "idle" || stale) void evaluateHull();
         }}
-        className="rounded p-0.5 text-slate-400 hover:bg-white/5 hover:text-cyan-200 disabled:opacity-30"
+        className="rounded-ctl p-0.5 text-fg-3 hover:bg-hover hover:text-fg disabled:opacity-30"
       >
-        {hull.status === "busy" ? <Loader2 size={12} className="animate-spin text-cyan-300" /> : <Calculator size={12} />}
+        {hull.status === "busy" ? <Loader2 size={12} className="animate-spin text-fg-3" /> : <Calculator size={12} />}
       </button>
       {open && (
         <div className="absolute top-7 left-0 z-50">

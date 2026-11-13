@@ -158,7 +158,7 @@ export function describeError(p: ErrorPayload, limits: StudioLimits = studioLimi
     return { title: p.command === "UNDO" ? "Nothing to undo" : "Nothing to redo", message: p.message || "The history is at its end.", level: "info" };
   }
   if (p.command === "REQUEST_PHONON_DOS" && p.code === "NO_PHONON_ANALYSIS") {
-    return { title: "Phonons out of date", message: `Run the shake-test on the current structure before computing the DOS${detail}.` };
+    return { title: "Phonons out of date", message: `Run phonons on the current structure before computing the DOS${detail}.` };
   }
   if (p.command === "COMPUTE_BULK_MODULUS") {
     return { title: "Bulk modulus failed", message: p.message };
@@ -176,12 +176,12 @@ export function describeError(p: ErrorPayload, limits: StudioLimits = studioLimi
     return { title: "Elastic tensor failed", message: p.message };
   }
   if (p.command === "CHECK_PHONON_CONVERGENCE") {
-    if (p.code === "NO_PHONON_ANALYSIS") return { title: "Phonons out of date", message: `Run the shake-test on the current structure before checking convergence${detail}.` };
+    if (p.code === "NO_PHONON_ANALYSIS") return { title: "Phonons out of date", message: `Run phonons on the current structure before checking convergence${detail}.` };
     if (p.code === "STRUCTURE_TOO_LARGE") return { title: "Supercell too large", message: `The next supercell exceeds the atom budget; convergence cannot be checked here${detail}.` };
     return { title: "Convergence check failed", message: p.message };
   }
   if (p.command === "EXPORT_PHONON_DATA") {
-    return { title: "Phonon export failed", message: p.code === "NO_PHONON_ANALYSIS" ? `Run the shake-test first${detail}.` : p.message };
+    return { title: "Phonon export failed", message: p.code === "NO_PHONON_ANALYSIS" ? `Run phonons first${detail}.` : p.message };
   }
   if (p.command === "LOAD_STRUCTURE" && p.code === "INVALID_ELEMENT") {
     return { title: "Element not supported", message: `The model covers Z ≤ 89 (H–Ac)${detail}.` };
@@ -204,7 +204,7 @@ export function describeError(p: ErrorPayload, limits: StudioLimits = studioLimi
       case "MODE_NOT_IMAGINARY":
         return { title: "Mode is not imaginary", message: `Only imaginary modes (f < 0) can be followed${detail}.` };
       case "NO_PHONON_ANALYSIS":
-        return { title: "Phonons out of date", message: `The structure changed since the shake-test; run it again first${detail}.` };
+        return { title: "Phonons out of date", message: `The structure changed since phonons were computed; run them again first${detail}.` };
     }
   }
   // ---- Phase C1
@@ -238,7 +238,7 @@ export function describeError(p: ErrorPayload, limits: StudioLimits = studioLimi
     };
   }
   if (p.command === "RUN_PHONON_SHAKE_TEST" && p.code === "STRUCTURE_TOO_LARGE") {
-    return { title: "Structure too large for phonons", message: `The shake-test supports at most ${limits.phononMaxAtoms} atoms per cell${detail}.` };
+    return { title: "Structure too large for phonons", message: `Phonons support at most ${limits.phononMaxAtoms} atoms per cell${detail}.` };
   }
   if (p.command === "REQUEST_HISTORY_ENTRY") return { title: "History entry unavailable", message: p.message, level: "warning" };
   return { title: errorTitle(p.code), message: p.message };

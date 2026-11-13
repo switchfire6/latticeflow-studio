@@ -14,8 +14,8 @@ import { broadenPattern, parsePattern, RADIATIONS, transformPattern, type Profil
 import { DiffractionChart } from "../charts/DiffractionChart";
 import { Button, Segmented, Slider, cx } from "./ui";
 
-const sel = "w-full rounded border border-white/10 bg-slate-900/80 px-1 py-0.5 font-mono text-[10.5px] text-slate-100 outline-none focus:border-cyan-400/50";
-const num = "w-12 rounded border border-white/10 bg-slate-900/80 px-1 py-0.5 text-right font-mono text-[10.5px] text-slate-100 outline-none focus:border-cyan-400/50";
+const sel = "w-full rounded-ctl border border-line bg-field px-1 py-0.5 text-xs text-fg outline-none focus:border-accent";
+const num = "w-12 rounded-ctl border border-line bg-field px-1 py-0.5 text-right font-mono text-xs text-fg outline-none focus:border-accent";
 
 /** Whether a settings change needs a new server computation (profile settings are client-side). */
 export function needsRecompute(a: DiffractionSettings, b: DiffractionSettings): boolean {
@@ -92,7 +92,7 @@ export function DiffractionPane() {
 
   return (
     <div className="flex h-full w-full min-w-0 gap-3">
-      <div className="flex w-[200px] shrink-0 flex-col gap-1.5 overflow-y-auto border-r border-white/[0.06] pr-3 text-[10.5px] text-slate-400" data-xrd-controls>
+      <div className="flex w-[200px] shrink-0 flex-col gap-1.5 overflow-y-auto border-r border-line-soft pr-3 text-xs text-fg-3" data-xrd-controls>
         <div className="flex items-center justify-between gap-1">
           <Segmented
             value={ds.kind}
@@ -102,7 +102,7 @@ export function DiffractionPane() {
             ]}
             onChange={(kind) => set({ kind })}
           />
-          <Button className="px-1.5 py-0.5 text-[10px]" variant={outdated ? "primary" : "ghost"} disabled={!hasCrystal || pending} onClick={recompute} title="Compute the pattern for the current structure">
+          <Button className="px-1.5 py-0.5 text-2xs" variant={outdated ? "primary" : "ghost"} disabled={!hasCrystal || pending} onClick={recompute} title="Compute the pattern for the current structure">
             {pending ? <Loader2 size={10} className="animate-spin" /> : <RefreshCw size={10} />} {diffraction ? "update" : "compute"}
           </Button>
         </div>
@@ -142,7 +142,7 @@ export function DiffractionPane() {
         {ds.shape !== "sticks" && (
           <Slider label="FWHM" value={ds.fwhm} min={0.02} max={1} step={0.01} format={(v) => `${v.toFixed(2)}°`} onChange={(fwhm) => set({ fwhm })} />
         )}
-        <div className="mt-0.5 border-t border-white/[0.06] pt-1.5">
+        <div className="mt-0.5 border-t border-line-soft pt-1.5">
           <input
             ref={fileRef}
             type="file"
@@ -157,10 +157,10 @@ export function DiffractionPane() {
           {experimental ? (
             <div className="space-y-1.5">
               <div className="flex items-center justify-between gap-1">
-                <span className="truncate text-amber-300" title={experimental.name}>
+                <span className="truncate text-warn" title={experimental.name}>
                   {experimental.name}
                 </span>
-                <button type="button" aria-label="remove the experimental pattern" className="text-slate-500 hover:text-slate-200" onClick={() => useCrystalStore.getState().setXrdExperimental(null)}>
+                <button type="button" aria-label="remove the experimental pattern" className="text-fg-4 hover:text-fg" onClick={() => useCrystalStore.getState().setXrdExperimental(null)}>
                   <X size={11} />
                 </button>
               </div>
@@ -168,27 +168,27 @@ export function DiffractionPane() {
               <Slider label="scale" value={scaleF} min={0.1} max={3} step={0.05} format={(v) => `${v.toFixed(2)}×`} onChange={setScaleF} />
             </div>
           ) : (
-            <Button className="w-full px-1.5 py-0.5 text-[10px]" onClick={() => fileRef.current?.click()} title="Two or three columns (2θ, I[, σ]); '#' comments">
+            <Button className="w-full px-1.5 py-0.5 text-2xs" onClick={() => fileRef.current?.click()} title="Two or three columns (2θ, I[, σ]); '#' comments">
               <FileUp size={10} /> Overlay experiment (.xy/.xye/.csv)
             </Button>
           )}
         </div>
         {diffraction && (
-          <p className="font-mono text-[10px] leading-snug text-slate-500">
+          <p className="text-2xs leading-snug text-fg-4">
             {peaks.length} peaks · λ {diffraction.result.wavelength_angstrom.toFixed(4)} Å ({diffraction.result.kind}
             {diffraction.result.radiation ? `, ${diffraction.result.radiation}` : ""})
           </p>
         )}
-        {stale && <p className="text-amber-300/80">Structure changed: update the pattern.</p>}
-        {error && <p className="text-rose-300">{error}</p>}
+        {stale && <p className="text-warn/80">Structure changed: update the pattern.</p>}
+        {error && <p className="text-bad">{error}</p>}
       </div>
       <div className="relative min-w-0 flex-1">
         {diffraction ? (
           <DiffractionChart peaks={peaks} profile={profile} experimental={exp} range={range} showSticks stale={stale} />
         ) : (
-          <div className="grid h-full place-items-center text-[11px] text-slate-500">
+          <div className="grid h-full place-items-center text-xs text-fg-4">
             {pending ? (
-              <span className="flex items-center gap-1.5 text-cyan-200">
+              <span className="flex items-center gap-1.5 text-fg-2">
                 <Loader2 size={12} className="animate-spin" /> computing the {ds.kind === "neutron" ? "neutron" : "X-ray"} pattern (λ {diffractionWavelength(ds).toFixed(4)} Å)…
               </span>
             ) : (

@@ -37,23 +37,23 @@ function ModelRow({ m, selected, current, onPick }: { m: ModelInfo; selected: bo
       aria-checked={selected}
       onClick={onPick}
       className={cx(
-        "flex w-full flex-col gap-0.5 rounded-lg border px-2 py-1.5 text-left transition-colors",
-        selected ? "border-cyan-400/50 bg-cyan-400/10" : "border-white/[0.06] hover:border-white/15 hover:bg-white/[0.03]",
+        "flex w-full flex-col gap-0.5 rounded-ctl border px-2 py-1.5 text-left transition-colors",
+        selected ? "border-accent/60 bg-accent-soft" : "border-line-soft hover:border-line-strong hover:bg-hover",
       )}
       data-model={m.id}
     >
       <span className="flex items-center gap-1.5">
-        <span className={cx("h-2.5 w-2.5 shrink-0 rounded-full border", selected ? "border-cyan-300 bg-cyan-300" : "border-slate-500")} />
-        <span className="text-[11.5px] font-medium text-slate-100">{m.label}</span>
+        <span className={cx("h-2.5 w-2.5 shrink-0 rounded-full border", selected ? "border-accent/60 bg-accent" : "border-line-strong")} />
+        <span className="text-sm font-medium text-fg">{m.label}</span>
         {current && (
-          <span className="rounded border border-emerald-400/40 px-1 font-mono text-[9px] text-emerald-300">
+          <span className="rounded-ctl border border-ok/40 px-1 text-2xs text-ok">
             <Check size={8} className="inline" /> in use
           </span>
         )}
-        {m.is_default && <span className="rounded border border-white/10 px-1 font-mono text-[9px] text-slate-400">default</span>}
-        <span className={cx("ml-auto font-mono text-[9.5px]", m.checkpoint_cached || m.family === "fallback" ? "text-slate-500" : "text-amber-300/90")}>{modelAvailabilityText(m)}</span>
+        {m.is_default && <span className="rounded-ctl border border-line px-1 text-2xs text-fg-3">default</span>}
+        <span className={cx("ml-auto text-2xs", m.checkpoint_cached || m.family === "fallback" ? "text-fg-4" : "text-warn/90")}>{modelAvailabilityText(m)}</span>
       </span>
-      <span className="pl-4 text-[10.5px] leading-snug text-slate-400">{m.description}</span>
+      <span className="pl-4 text-xs leading-snug text-fg-3">{m.description}</span>
     </button>
   );
 }
@@ -79,16 +79,16 @@ export function ModelPopover({ onClose }: { onClose(): void }) {
   const change = info ? isModelChange({ id: info.id, dispersion: info.supports_dispersion && d3 }, model, models?.default_model_id) : false;
 
   return (
-    <div className="w-[400px] rounded-xl border border-white/10 bg-slate-950/95 p-3 text-[11.5px] text-slate-300 shadow-[0_12px_48px_rgba(0,0,0,0.6)] backdrop-blur-md" data-model-picker>
+    <div className="w-[400px] rounded-panel border border-line bg-surface p-3 text-sm text-fg-2 shadow-lg shadow-black/40" data-model-picker>
       <div className="mb-1.5 flex items-center justify-between">
-        <span className="text-[10px] font-semibold tracking-[0.18em] text-slate-400 uppercase">uMLIP model · this session</span>
-        <button type="button" onClick={onClose} className="text-slate-500 hover:text-slate-200" aria-label="close">
+        <span className="text-2xs font-semibold tracking-[0.06em] text-fg-3 uppercase">uMLIP model · this session</span>
+        <button type="button" onClick={onClose} className="text-fg-4 hover:text-fg" aria-label="close">
           <X size={13} />
         </button>
       </div>
-      <p className="mb-2 rounded-md border border-cyan-400/20 bg-cyan-400/[0.06] px-2 py-1 text-[10.5px] leading-snug text-cyan-100/90">{MODEL_HINT}</p>
+      <p className="mb-2 rounded-ctl border border-line bg-raised px-2 py-1 text-xs leading-snug text-fg-2">{MODEL_HINT}</p>
       {!models ? (
-        <p className={cx("py-2", modelsError ? "text-rose-300" : "text-slate-500")}>{modelsError ? `Could not list models: ${modelsError}` : "loading models…"}</p>
+        <p className={cx("py-2", modelsError ? "text-bad" : "text-fg-4")}>{modelsError ? `Could not list models: ${modelsError}` : "loading models…"}</p>
       ) : (
         <div className="max-h-[300px] space-y-1 overflow-y-auto pr-0.5" role="radiogroup">
           {models.models.map((m) => (
@@ -96,9 +96,9 @@ export function ModelPopover({ onClose }: { onClose(): void }) {
           ))}
         </div>
       )}
-      <label className={cx("mt-2 flex items-center justify-between gap-2 text-[11px]", !info?.supports_dispersion && "opacity-40")} title="Grimme D3(BJ) dispersion correction: essential for layered, vdW and molecular crystals">
+      <label className={cx("mt-2 flex items-center justify-between gap-2 text-xs", !info?.supports_dispersion && "opacity-40")} title="Grimme D3(BJ) dispersion correction: essential for layered, vdW and molecular crystals">
         <span>D3 dispersion correction</span>
-        <input type="checkbox" className="accent-cyan-400" disabled={!info?.supports_dispersion} checked={!!info?.supports_dispersion && d3} onChange={(e) => setD3(e.target.checked)} />
+        <input type="checkbox" className="accent-accent" disabled={!info?.supports_dispersion} checked={!!info?.supports_dispersion && d3} onChange={(e) => setD3(e.target.checked)} />
       </label>
       {switching && (
         <div className="mt-2">
@@ -106,11 +106,11 @@ export function ModelPopover({ onClose }: { onClose(): void }) {
         </div>
       )}
       {lastError && !switching && (
-        <p className="mt-2 flex gap-1 text-[10.5px] leading-snug text-rose-300" data-model-error>
+        <p className="mt-2 flex gap-1 text-xs leading-snug text-bad" data-model-error>
           <AlertTriangle size={11} className="mt-px shrink-0" /> {lastError.message || lastError.code} — the session keeps its current model.
         </p>
       )}
-      <p className="mt-2 text-[10px] leading-snug text-slate-500">Switching re-evaluates the structure (one undo step). Phonons are dropped; K, C_ij, E_hull and other model results are marked stale.</p>
+      <p className="mt-2 text-2xs leading-snug text-fg-4">Switching re-evaluates the structure (one undo step). Phonons are dropped; K, C_ij, E_hull and other model results are marked stale.</p>
       <Button
         variant="primary"
         className="mt-2 w-full"
@@ -141,7 +141,7 @@ export function ModelBadge() {
       {active ? (
         <button type="button" onClick={() => setOpen((o) => !o)} aria-expanded={open} title="Choose the uMLIP model for this session" data-model-badge>
           {isFallback(active) ? (
-            <Badge tone="amber" pulse title={health?.load_error ?? "MACE-MP-0 could not be loaded"}>
+            <Badge tone="amber" title={health?.load_error ?? "MACE-MP-0 could not be loaded"}>
               <AlertTriangle size={11} /> {active.backendName} {active.source === "process" ? "(MACE not loaded)" : ""}
             </Badge>
           ) : (
@@ -151,7 +151,7 @@ export function ModelBadge() {
           )}
         </button>
       ) : (
-        <span className="font-mono text-[11px] text-slate-500" title={healthError ?? undefined}>
+        <span className="text-xs text-fg-4" title={healthError ?? undefined}>
           backend {healthError ? "unreachable" : "…"}
         </span>
       )}

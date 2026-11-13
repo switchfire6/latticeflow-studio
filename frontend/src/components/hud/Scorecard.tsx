@@ -19,12 +19,12 @@ import { computeScorecard, scorecardSummary, type CheckId, type CheckState, type
 import { Panel, cx } from "./ui";
 
 const STATE_STYLE: Record<CheckState, { cls: string; label: string }> = {
-  pass: { cls: "border-emerald-400/50 bg-emerald-400/15 text-emerald-300", label: "pass" },
-  fail: { cls: "border-rose-500/60 bg-rose-500/15 text-rose-300", label: "fail" },
-  stale: { cls: "border-amber-400/50 bg-amber-400/10 text-amber-300", label: "stale" },
-  notrun: { cls: "border-white/10 bg-white/[0.03] text-slate-500", label: "not run" },
-  running: { cls: "border-cyan-400/50 bg-cyan-400/10 text-cyan-200", label: "running" },
-  unavailable: { cls: "border-white/10 bg-white/[0.03] text-slate-500", label: "n/a" },
+  pass: { cls: "border-ok/50 bg-ok/15 text-ok", label: "pass" },
+  fail: { cls: "border-bad/60 bg-bad/15 text-bad", label: "fail" },
+  stale: { cls: "border-warn/50 bg-warn/10 text-warn", label: "stale" },
+  notrun: { cls: "border-line bg-raised text-fg-4", label: "not run" },
+  running: { cls: "border-accent/60 bg-accent-soft text-accent-fg", label: "running" },
+  unavailable: { cls: "border-line bg-raised text-fg-4", label: "n/a" },
 };
 
 function StateIcon({ state }: { state: CheckState }) {
@@ -47,7 +47,7 @@ function StateIcon({ state }: { state: CheckState }) {
 
 const RUN_LABEL: Record<CheckId, string> = {
   relaxed: "Relax",
-  dynamic: "Shake-test",
+  dynamic: "Phonons",
   mechanical: "Elastic tensor",
   thermo: "Evaluate E_hull",
 };
@@ -70,14 +70,14 @@ export interface ScorecardViewProps {
 
 export function ScorecardView(p: ScorecardViewProps) {
   const sum = scorecardSummary(p.checks);
-  const tone = { green: "text-emerald-300", red: "text-rose-300", amber: "text-amber-300", slate: "text-slate-400" }[sum.tone];
+  const tone = { green: "text-ok", red: "text-bad", amber: "text-warn", slate: "text-fg-3" }[sum.tone];
   return (
-    <Panel className="pointer-events-auto w-[310px] p-2">
+    <Panel floating className="pointer-events-auto w-[310px] px-2.5 py-2">
       <button type="button" className="flex w-full items-center gap-1.5 px-0.5" onClick={p.onToggle} aria-expanded={!p.collapsed} data-scorecard-toggle>
-        {p.collapsed ? <ChevronRight size={12} className="text-slate-500" /> : <ChevronDown size={12} className="text-slate-500" />}
-        <ShieldQuestion size={13} className="text-cyan-300" />
-        <span className="text-[10px] font-semibold tracking-[0.1em] whitespace-nowrap text-slate-300 uppercase">Is this crystal real?</span>
-        <span className={cx("ml-auto font-mono text-[10px] whitespace-nowrap", tone)}>{sum.text}</span>
+        {p.collapsed ? <ChevronRight size={12} className="text-fg-4" /> : <ChevronDown size={12} className="text-fg-4" />}
+        <ShieldQuestion size={13} className="text-fg-3" />
+        <span className="text-2xs font-semibold tracking-[0.06em] whitespace-nowrap text-fg-3 uppercase">Stability</span>
+        <span className={cx("ml-auto text-2xs whitespace-nowrap tabular-nums", tone)}>{sum.text}</span>
         {p.collapsed && (
           <span className="ml-1 flex gap-0.5">
             {p.checks.map((c) => (
@@ -89,31 +89,31 @@ export function ScorecardView(p: ScorecardViewProps) {
         )}
       </button>
       {!p.collapsed && (
-        <div className="mt-1.5 space-y-1" data-scorecard>
+        <div className="mt-1.5 divide-y divide-line-soft" data-scorecard>
           {p.checks.map((c) => {
             const st = STATE_STYLE[c.state];
             const isRelax = c.id === "relaxed";
             const stop = isRelax && c.state === "running";
             return (
-              <div key={c.id} className="rounded-lg border border-white/[0.05] bg-white/[0.015] px-1.5 py-1" data-check={c.id} data-state={c.state}>
-                <div className="flex items-center gap-1.5">
+              <div key={c.id} className="py-1.5" data-check={c.id} data-state={c.state}>
+                <div className="flex items-center gap-2">
                   <span className={cx("grid h-[18px] w-[18px] shrink-0 place-items-center rounded-full border", st.cls)} title={st.label}>
                     <StateIcon state={c.state} />
                   </span>
                   <div className="min-w-0 flex-1 leading-tight">
                     <div className="flex items-baseline gap-1.5">
-                      <span className="text-[11px] font-medium text-slate-100">{c.title}</span>
-                      <span className={cx("font-mono text-[9px] uppercase", st.cls.split(" ").find((x) => x.startsWith("text-")))}>{st.label}</span>
+                      <span className="text-xs font-medium text-fg">{c.title}</span>
+                      <span className={cx("text-2xs font-medium", st.cls.split(" ").find((x) => x.startsWith("text-")))}>{st.label}</span>
                     </div>
-                    <div className="truncate font-mono text-[10px] text-slate-300" title={c.value}>
+                    <div className="truncate font-mono text-2xs text-fg-2" title={c.value}>
                       {c.value}
                     </div>
                     {c.detail && (
-                      <div className="truncate font-mono text-[9.5px] text-slate-500" title={c.detail}>
+                      <div className="truncate text-2xs text-fg-4" title={c.detail}>
                         {c.detail}
                       </div>
                     )}
-                    {c.warning && <div className="truncate font-mono text-[9.5px] text-amber-300/90" title={c.warning}>⚠ {c.warning}</div>}
+                    {c.warning && <div className="truncate text-2xs text-warn" title={c.warning}>⚠ {c.warning}</div>}
                   </div>
                   <button
                     type="button"
@@ -121,8 +121,8 @@ export function ScorecardView(p: ScorecardViewProps) {
                     onClick={() => p.onRun(c.id)}
                     title={stop ? "Stop the relaxation" : p.busy ? "Busy: wait for the running calculation" : `${RUN_LABEL[c.id]}${c.state === "pass" || c.state === "fail" || c.state === "stale" ? " (re-run)" : ""}`}
                     className={cx(
-                      "grid h-6 w-6 shrink-0 place-items-center rounded-md border transition-colors disabled:opacity-30",
-                      stop ? "border-rose-500/50 text-rose-300 hover:bg-rose-500/15" : "border-white/10 text-slate-300 hover:border-cyan-400/50 hover:text-cyan-100",
+                      "grid h-6 w-6 shrink-0 place-items-center rounded-ctl transition-colors disabled:opacity-30",
+                      stop ? "text-bad hover:bg-bad/15" : "text-fg-3 hover:bg-hover hover:text-fg",
                     )}
                     aria-label={stop ? "stop" : `run ${c.title}`}
                     data-run={c.id}
@@ -131,16 +131,16 @@ export function ScorecardView(p: ScorecardViewProps) {
                   </button>
                 </div>
                 {p.confirming === c.id && c.prerequisite && (
-                  <div className="mt-1 rounded-md border border-amber-400/30 bg-amber-400/[0.07] p-1.5 text-[10.5px] text-amber-100" data-confirm>
+                  <div className="mt-1 rounded-ctl border border-warn/30 bg-warn/[0.07] p-1.5 text-xs text-warn" data-confirm>
                     <div className="mb-1">{c.prerequisite} — relax first?</div>
                     <div className="flex gap-1">
-                      <button type="button" className="rounded border border-cyan-400/50 bg-cyan-400/15 px-1.5 py-0.5 text-cyan-100 hover:bg-cyan-400/25" onClick={() => p.onConfirm("relax-then-run")}>
+                      <button type="button" className="rounded-ctl border border-line-strong bg-raised px-1.5 py-0.5 text-fg hover:bg-hover" onClick={() => p.onConfirm("relax-then-run")}>
                         Relax, then {RUN_LABEL[c.id].toLowerCase()}
                       </button>
-                      <button type="button" className="rounded border border-white/10 px-1.5 py-0.5 text-slate-300 hover:bg-white/5" onClick={() => p.onConfirm("run-anyway")}>
+                      <button type="button" className="rounded-ctl border border-line px-1.5 py-0.5 text-fg-2 hover:bg-hover" onClick={() => p.onConfirm("run-anyway")}>
                         Run anyway
                       </button>
-                      <button type="button" className="ml-auto px-1 text-slate-500 hover:text-slate-200" onClick={() => p.onConfirm("cancel")} aria-label="cancel">
+                      <button type="button" className="ml-auto px-1 text-fg-4 hover:text-fg" onClick={() => p.onConfirm("cancel")} aria-label="cancel">
                         <X size={11} />
                       </button>
                     </div>
@@ -153,7 +153,7 @@ export function ScorecardView(p: ScorecardViewProps) {
             <button
               type="button"
               onClick={p.onAgreement}
-              className="flex w-full items-center gap-1.5 rounded-lg border border-white/[0.05] bg-white/[0.015] px-1.5 py-1 text-left"
+              className="flex w-full items-center gap-2 py-1.5 text-left hover:bg-hover"
               data-check="agreement"
               title="Committee of models (Compare models); click for the table"
             >
@@ -161,8 +161,8 @@ export function ScorecardView(p: ScorecardViewProps) {
                 <StateIcon state={p.agreement.stale ? "stale" : p.agreement.agree ? "pass" : "fail"} />
               </span>
               <span className="min-w-0 flex-1 leading-tight">
-                <span className="text-[11px] font-medium text-slate-100">Model agreement</span>
-                <span className="block truncate font-mono text-[10px] text-slate-300">{p.agreement.text}</span>
+                <span className="text-xs font-medium text-fg">Model agreement</span>
+                <span className="block truncate font-mono text-2xs text-fg-2">{p.agreement.text}</span>
               </span>
             </button>
           )}

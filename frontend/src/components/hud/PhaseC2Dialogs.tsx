@@ -12,6 +12,7 @@
  * Plus the Structure card's "Match to Materials Project" (POST /api/mp/match)
  * and the generator's ranked GENERATION_CANDIDATES list.
  */
+import { SERIES_COLORS } from "../../utils/chartData";
 import { Database, Loader2, Search, Square } from "lucide-react";
 import { useEffect, useState } from "react";
 import { ApiError, api } from "../../services/apiClient";
@@ -31,8 +32,7 @@ import { Modal, Warn } from "./PhaseCDialogs";
 import { Button, FormulaText, Segmented, Toggle, cx, inputCls } from "./ui";
 
 const close = () => useUi.getState().closeDialog();
-const COLOR_A = "#22d3ee";
-const COLOR_B = "#f5a524";
+const [COLOR_A, COLOR_B] = SERIES_COLORS;
 const fx = (v: number | null | undefined, d = 3) => (v == null || !Number.isFinite(v) ? "—" : v.toFixed(d));
 const signed = (v: number | null | undefined, d = 1) => (v == null || !Number.isFinite(v) ? "—" : `${v > 0 ? "+" : v < 0 ? "−" : "±"}${Math.abs(v).toFixed(d)}`);
 
@@ -70,7 +70,7 @@ function SidePicker({ label, color, value, onChange }: { label: string; color: s
   const selectedId = pending ?? (value ? (opts.find((o) => o.snapshot && o.snapshot.key === value.key && sameStructure(o.snapshot.crystal, value.crystal))?.id ?? "__kept") : "");
   return (
     <label className="block min-w-0 flex-1">
-      <div className="mb-0.5 flex items-center gap-1 text-[10px] text-slate-500">
+      <div className="mb-0.5 flex items-center gap-1 text-2xs text-fg-4">
         <span className="h-2 w-2 rounded-full" style={{ background: color }} /> {label}
       </div>
       <select
@@ -130,8 +130,8 @@ function PhononOverlay({ a, b }: { a: PhononSnapshot; b: PhononSnapshot }) {
     ];
   }
   return (
-    <div className="rounded-md border border-white/[0.06] p-1.5" data-compare-phonons>
-      <div className="mb-1 flex items-center gap-2 text-[10px] text-slate-500">
+    <div className="rounded-ctl border border-line-soft p-1.5" data-compare-phonons>
+      <div className="mb-1 flex items-center gap-2 text-2xs text-fg-4">
         <span>phonons</span>
         <Segmented<"dos" | "branch">
           value={m}
@@ -154,7 +154,7 @@ function PhononOverlay({ a, b }: { a: PhononSnapshot; b: PhononSnapshot }) {
           shadeBelowX={m === "dos" ? 0 : undefined}
         />
       </div>
-      {m === "branch" && <p className="mt-0.5 text-[9.5px] text-slate-500">Each structure's own high-symmetry path, scaled to 0–1 (paths of different cells do not align point by point).</p>}
+      {m === "branch" && <p className="mt-0.5 text-2xs text-fg-4">Each structure's own high-symmetry path, scaled to 0–1 (paths of different cells do not align point by point).</p>}
     </div>
   );
 }
@@ -187,19 +187,19 @@ export function CompareDialog() {
   const pb = phononOf(b);
   return (
     <Modal title="Compare structures" width={600} onClose={close}>
-      <div className="space-y-2.5 text-[11px] text-slate-300" data-compare>
+      <div className="space-y-2.5 text-xs text-fg-2" data-compare>
         <div className="flex gap-2">
           <SidePicker label="A" color={COLOR_A} value={a} onChange={(s) => useUi.getState().setCompare({ a: s })} />
           <SidePicker label="B" color={COLOR_B} value={b} onChange={(s) => useUi.getState().setCompare({ b: s })} />
         </div>
-        <p className="text-[10px] leading-snug text-slate-500">
+        <p className="text-2xs leading-snug text-fg-4">
           Every history entry can be picked (structures not seen yet are fetched from the server). ΔE assumes both energies come from the same model.
         </p>
         {state.status === "busy" && <ProgressBar message="comparing (StructureMatcher, symmetry)…" />}
-        {state.status === "error" && <p className="text-[10.5px] text-rose-300">{state.error}</p>}
+        {state.status === "error" && <p className="text-xs text-bad">{state.error}</p>}
         {a && b && (
-          <table className="w-full font-mono text-[10.5px] tabular-nums" data-compare-table>
-            <thead className="text-slate-500">
+          <table className="w-full font-mono text-xs tabular-nums" data-compare-table>
+            <thead className="text-fg-4">
               <tr>
                 <th className="text-left font-normal" />
                 <th className="text-right font-normal" style={{ color: COLOR_A }}>
@@ -212,68 +212,68 @@ export function CompareDialog() {
               </tr>
             </thead>
             <tbody>
-              <tr className="border-t border-white/[0.04]">
-                <td className="text-slate-500">formula · atoms</td>
-                <td className="text-right text-slate-100">
+              <tr className="border-t border-line-soft">
+                <td className="text-fg-4">formula · atoms</td>
+                <td className="text-right text-fg">
                   <FormulaText formula={a.crystal.formula} /> · {a.crystal.atoms.length}
                 </td>
-                <td className="text-right text-slate-100">
+                <td className="text-right text-fg">
                   <FormulaText formula={b.crystal.formula} /> · {b.crystal.atoms.length}
                 </td>
-                <td className="text-right text-slate-400">{r ? (r.same_composition ? "same composition" : "different composition") : ""}</td>
+                <td className="text-right text-fg-3">{r ? (r.same_composition ? "same composition" : "different composition") : ""}</td>
               </tr>
-              <tr className="border-t border-white/[0.04]">
-                <td className="text-slate-500">space group</td>
-                <td className="text-right text-slate-100">{r?.spacegroup_a ?? `${a.crystal.spacegroup_symbol} (#${a.crystal.spacegroup_number})`}</td>
-                <td className="text-right text-slate-100">{r?.spacegroup_b ?? `${b.crystal.spacegroup_symbol} (#${b.crystal.spacegroup_number})`}</td>
-                <td className="text-right text-cyan-100" data-group-subgroup>
+              <tr className="border-t border-line-soft">
+                <td className="text-fg-4">space group</td>
+                <td className="text-right text-fg">{r?.spacegroup_a ?? `${a.crystal.spacegroup_symbol} (#${a.crystal.spacegroup_number})`}</td>
+                <td className="text-right text-fg">{r?.spacegroup_b ?? `${b.crystal.spacegroup_symbol} (#${b.crystal.spacegroup_number})`}</td>
+                <td className="text-right text-fg" data-group-subgroup>
                   {r?.group_subgroup ?? "—"}
                 </td>
               </tr>
-              <tr className="border-t border-white/[0.04]">
-                <td className="text-slate-500">structure match</td>
+              <tr className="border-t border-line-soft">
+                <td className="text-fg-4">structure match</td>
                 <td colSpan={2} className="text-right">
-                  {r ? <span className={r.structures_match ? "text-emerald-300" : "text-amber-300"}>{r.structures_match ? "same structure" : "different structures"}</span> : "—"}
+                  {r ? <span className={r.structures_match ? "text-ok" : "text-warn"}>{r.structures_match ? "same structure" : "different structures"}</span> : "—"}
                 </td>
-                <td className="text-right text-slate-300">{r?.rms_displacement != null ? `rms ${r.rms_displacement.toFixed(3)}${r.max_displacement != null ? ` · max ${r.max_displacement.toFixed(3)}` : ""}` : "—"}</td>
+                <td className="text-right text-fg-2">{r?.rms_displacement != null ? `rms ${r.rms_displacement.toFixed(3)}${r.max_displacement != null ? ` · max ${r.max_displacement.toFixed(3)}` : ""}` : "—"}</td>
               </tr>
-              <tr className="border-t border-white/[0.04]">
-                <td className="text-slate-500">V / atom (Å³)</td>
+              <tr className="border-t border-line-soft">
+                <td className="text-fg-4">V / atom (Å³)</td>
                 <td className="text-right">{fx(r?.volume_per_atom_a ?? a.crystal.lattice.volume / a.crystal.atoms.length, 3)}</td>
                 <td className="text-right">{fx(r?.volume_per_atom_b ?? b.crystal.lattice.volume / b.crystal.atoms.length, 3)}</td>
-                <td className="text-right text-slate-100">{r ? `${signed(r.volume_change_percent, 2)} %` : "—"}</td>
+                <td className="text-right text-fg">{r ? `${signed(r.volume_change_percent, 2)} %` : "—"}</td>
               </tr>
-              <tr className="border-t border-white/[0.04]">
-                <td className="text-slate-500">E / atom (eV)</td>
+              <tr className="border-t border-line-soft">
+                <td className="text-fg-4">E / atom (eV)</td>
                 <td className="text-right">{fx(r?.energy_per_atom_a ?? a.crystal.energy_per_atom, 4)}</td>
                 <td className="text-right">{fx(r?.energy_per_atom_b ?? b.crystal.energy_per_atom, 4)}</td>
-                <td className={cx("text-right", r && r.energy_difference_mev_per_atom < 0 ? "text-emerald-300" : "text-slate-100")} data-delta-e>
+                <td className={cx("text-right", r && r.energy_difference_mev_per_atom < 0 ? "text-ok" : "text-fg")} data-delta-e>
                   {r ? `${signed(r.energy_difference_mev_per_atom, 1)} meV/atom` : "—"}
                 </td>
               </tr>
-              <tr className="border-t border-white/[0.04]">
-                <td className="text-slate-500">ΔE per formula unit</td>
+              <tr className="border-t border-line-soft">
+                <td className="text-fg-4">ΔE per formula unit</td>
                 <td colSpan={2} />
-                <td className="text-right text-slate-100">{r?.energy_difference_mev_per_formula_unit != null ? `${signed(r.energy_difference_mev_per_formula_unit, 1)} meV/f.u.` : r ? "n/a (compositions differ)" : "—"}</td>
+                <td className="text-right text-fg">{r?.energy_difference_mev_per_formula_unit != null ? `${signed(r.energy_difference_mev_per_formula_unit, 1)} meV/f.u.` : r ? "n/a (compositions differ)" : "—"}</td>
               </tr>
               {latticeRows(a.crystal, b.crystal).map((row) => (
-                <tr key={row.k} className="border-t border-white/[0.04]">
-                  <td className="text-slate-500">
+                <tr key={row.k} className="border-t border-line-soft">
+                  <td className="text-fg-4">
                     {row.k} ({row.unit})
                   </td>
                   <td className="text-right">{row.va.toFixed(row.unit === "Å" ? 4 : 2)}</td>
                   <td className="text-right">{row.vb.toFixed(row.unit === "Å" ? 4 : 2)}</td>
-                  <td className="text-right text-slate-300">{row.unit === "Å" ? `${signed(row.delta, 2)} %` : `${signed(row.delta, 2)}°`}</td>
+                  <td className="text-right text-fg-2">{row.unit === "Å" ? `${signed(row.delta, 2)} %` : `${signed(row.delta, 2)}°`}</td>
                 </tr>
               ))}
             </tbody>
           </table>
         )}
-        {r && <div className="font-mono text-[9.5px] text-slate-500">{r.method}</div>}
+        {r && <div className="text-2xs text-fg-4">{r.method}</div>}
         {a && b && pa && pb ? (
           <PhononOverlay a={pa} b={pb} />
         ) : a && b ? (
-          <p className="text-[10px] text-slate-500">Phonon overlay: run the shake-test on both structures (while each is active) to compare their DOS / lowest branch.</p>
+          <p className="text-2xs text-fg-4">Phonon overlay: run phonons on both structures (while each is active) to compare their DOS / lowest branch.</p>
         ) : null}
       </div>
     </Modal>
@@ -301,25 +301,25 @@ export function MpMatchSection() {
   };
   const r = st.result;
   return (
-    <div className="mt-2 border-t border-white/[0.06] pt-2" data-mp-match>
-      <Button className="w-full px-2 py-1 text-[10.5px]" disabled={st.status === "busy"} onClick={() => void run()} title="Which Materials Project entries of this formula match the structure (pymatgen StructureMatcher)?">
+    <div className="mt-2 border-t border-line-soft pt-2" data-mp-match>
+      <Button className="w-full px-2 py-1 text-xs" disabled={st.status === "busy"} onClick={() => void run()} title="Which Materials Project entries of this formula match the structure (pymatgen StructureMatcher)?">
         {st.status === "busy" ? <Loader2 size={11} className="animate-spin" /> : <Database size={11} />} Match to Materials Project
       </Button>
       {st.status === "error" && st.error && (
-        <p className={cx("mt-1 text-[10.5px] leading-snug", st.error.tone === "amber" ? "text-amber-200" : st.error.tone === "slate" ? "text-slate-400" : "text-rose-300")}>
+        <p className={cx("mt-1 text-xs leading-snug", st.error.tone === "amber" ? "text-warn" : st.error.tone === "slate" ? "text-fg-3" : "text-bad")}>
           <span className="font-semibold">{st.error.title}.</span> {st.error.message}
         </p>
       )}
       {r && (
         <div className={cx("mt-1", stale && "opacity-50")}>
-          <div className="font-mono text-[10px] text-slate-500">
+          <div className="font-mono text-2xs text-fg-4">
             <FormulaText formula={r.formula} /> · {r.n_searched} MP entries searched{stale ? " · stale (structure changed)" : ""}
           </div>
           {r.matches.length === 0 ? (
-            <p className="text-[10.5px] text-slate-400">No match: this structure is not among the known MP phases of this formula.</p>
+            <p className="text-xs text-fg-3">No match: this structure is not among the known MP phases of this formula.</p>
           ) : (
-            <table className="mt-0.5 w-full font-mono text-[10.5px] tabular-nums">
-              <thead className="text-slate-500">
+            <table className="mt-0.5 w-full font-mono text-xs tabular-nums">
+              <thead className="text-fg-4">
                 <tr>
                   <th className="text-left font-normal">mp-id</th>
                   <th className="text-left font-normal">SG</th>
@@ -329,15 +329,15 @@ export function MpMatchSection() {
               </thead>
               <tbody>
                 {r.matches.map((m) => (
-                  <tr key={m.entry.material_id} className="border-t border-white/[0.04]">
+                  <tr key={m.entry.material_id} className="border-t border-line-soft">
                     <td>
-                      <a className="text-cyan-200 hover:underline" href={`https://next-gen.materialsproject.org/materials/${m.entry.material_id}`} target="_blank" rel="noreferrer">
+                      <a className="text-fg underline decoration-fg-5 underline-offset-2 hover:decoration-fg-3" href={`https://next-gen.materialsproject.org/materials/${m.entry.material_id}`} target="_blank" rel="noreferrer">
                         {m.entry.material_id}
                       </a>
                     </td>
-                    <td className="text-slate-200">{m.entry.spacegroup_symbol}</td>
-                    <td className="text-right text-slate-200">{m.entry.energy_above_hull != null ? `${(m.entry.energy_above_hull * 1000).toFixed(0)} meV` : "—"}</td>
-                    <td className="text-right text-slate-400">{m.rms_displacement.toFixed(3)}</td>
+                    <td className="text-fg">{m.entry.spacegroup_symbol}</td>
+                    <td className="text-right text-fg">{m.entry.energy_above_hull != null ? `${(m.entry.energy_above_hull * 1000).toFixed(0)} meV` : "—"}</td>
+                    <td className="text-right text-fg-3">{m.rms_displacement.toFixed(3)}</td>
                   </tr>
                 ))}
               </tbody>
@@ -357,12 +357,12 @@ export function GenerationCandidatesList() {
   const busy = useCrystalStore((s) => s.streams.length > 0);
   if (!gc || gc.candidates.length === 0) return null;
   return (
-    <div className="rounded-md border border-white/[0.06] bg-white/[0.015] p-1.5" data-generation-candidates>
-      <div className="mb-1 font-mono text-[10px] leading-snug text-slate-400" data-search-summary>
+    <div className="rounded-ctl border border-line-soft bg-raised p-1.5" data-generation-candidates>
+      <div className="mb-1 text-2xs leading-snug text-fg-3" data-search-summary>
         {searchSummaryText(gc.summary, gc.candidates.length)}
       </div>
-      <table className="w-full font-mono text-[10.5px] tabular-nums">
-        <thead className="text-slate-500">
+      <table className="w-full font-mono text-xs tabular-nums">
+        <thead className="text-fg-4">
           <tr>
             <th className="text-left font-normal">#</th>
             <th className="text-right font-normal" title="Energy above the best candidate">ΔE meV/at</th>
@@ -374,18 +374,18 @@ export function GenerationCandidatesList() {
           {gc.candidates.map((c) => {
             const active = !!crystal && sameStructure(crystal, c.crystal);
             return (
-              <tr key={c.rank} className={cx("border-t border-white/[0.04]", active && "bg-cyan-400/[0.07]")}>
-                <td className="text-slate-500">{c.rank}</td>
-                <td className={cx("text-right", c.rank === 1 ? "text-emerald-300" : "text-slate-200")}>{c.relative_energy_mev_per_atom.toFixed(1)}</td>
+              <tr key={c.rank} className={cx("border-t border-line-soft", active && "bg-accent-soft")}>
+                <td className="text-fg-4">{c.rank}</td>
+                <td className={cx("text-right", c.rank === 1 ? "text-ok" : "text-fg")}>{c.relative_energy_mev_per_atom.toFixed(1)}</td>
                 <td className="max-w-[150px] pl-2 leading-tight" title={`${c.spacegroup_symbol} (#${c.spacegroup_number}) · ${c.wyckoff_assignment}`}>
-                  <div className="text-slate-200">{c.spacegroup_symbol}</div>
-                  <div className="truncate text-[9.5px] text-slate-500">{c.wyckoff_assignment}</div>
+                  <div className="text-fg">{c.spacegroup_symbol}</div>
+                  <div className="truncate text-2xs text-fg-4">{c.wyckoff_assignment}</div>
                 </td>
                 <td className="text-right">
                   {active ? (
-                    <span className="text-[9.5px] text-cyan-300">active</span>
+                    <span className="text-2xs text-fg-3">active</span>
                   ) : (
-                    <Button className="px-1.5 py-0 text-[10px]" disabled={!connected || busy} onClick={() => commands.loadCrystal(c.crystal)}>
+                    <Button className="px-1.5 py-0 text-2xs" disabled={!connected || busy} onClick={() => commands.loadCrystal(c.crystal)}>
                       Load
                     </Button>
                   )}
@@ -416,17 +416,17 @@ export function PrototypeDialog() {
   const noKey = !!err && /MP_API_KEY/i.test(err.message);
   return (
     <Modal title="From known prototypes (ionic substitution)" width={600} onClose={close}>
-      <div className="space-y-2.5 text-[11px] text-slate-300" data-prototype>
-        <p className="text-slate-400">
+      <div className="space-y-2.5 text-xs text-fg-2" data-prototype>
+        <p className="text-fg-3">
           Known Materials Project structures of other chemistries are re-decorated with the target ions, ranked by the ionic-substitution probability (pymatgen SubstitutionPredictor), then relaxed and scored with the session model.
         </p>
         <div className="flex items-end gap-2">
           <label className="block flex-1">
-            <div className="mb-0.5 text-[10px] text-slate-500">target formula</div>
-            <input className={cx(inputCls, formula.trim() !== "" && !parsed.ok && "border-rose-500/60")} value={formula} spellCheck={false} onChange={(e) => setFormula(e.target.value)} placeholder="NaNbO3, Li3PS4…" />
+            <div className="mb-0.5 text-2xs text-fg-4">target formula</div>
+            <input className={cx(inputCls, formula.trim() !== "" && !parsed.ok && "border-bad/60")} value={formula} spellCheck={false} onChange={(e) => setFormula(e.target.value)} placeholder="NaNbO3, Li3PS4…" />
           </label>
           <label className="block w-24">
-            <div className="mb-0.5 text-[10px] text-slate-500">max candidates</div>
+            <div className="mb-0.5 text-2xs text-fg-4">max candidates</div>
             <input className={inputCls} inputMode="numeric" value={maxCand} onChange={(e) => setMaxCand(Math.max(1, Math.min(30, Number.parseInt(e.target.value, 10) || 1)))} />
           </label>
         </div>
@@ -451,7 +451,7 @@ export function PrototypeDialog() {
             )}
           </span>
         </div>
-        {!parsed.ok && formula.trim() !== "" && <p className="text-[10.5px] text-rose-300">{parsed.error}</p>}
+        {!parsed.ok && formula.trim() !== "" && <p className="text-xs text-bad">{parsed.error}</p>}
         {running && <ProgressBar done={progress?.done} total={progress?.total} message={progress?.message ?? "fetching prototypes…"} />}
         {err &&
           (noKey ? (
@@ -459,21 +459,21 @@ export function PrototypeDialog() {
               Materials Project not configured: {MP_KEY_HINT} ({err.message})
             </Warn>
           ) : (
-            <p className="text-[10.5px] text-rose-300">
+            <p className="text-xs text-bad">
               {err.code}: {err.message}
             </p>
           ))}
-        {search?.status === "stopped" && <p className="text-[10.5px] text-amber-300">Search stopped.</p>}
+        {search?.status === "stopped" && <p className="text-xs text-warn">Search stopped.</p>}
         {res && (
           <div data-prototype-result>
-            <div className="mb-1 font-mono text-[10.5px] text-slate-400">
+            <div className="mb-1 font-mono text-xs text-fg-3">
               <FormulaText formula={res.target_formula} /> · {res.n_sources} prototypes considered · {res.candidates.length} candidates · {res.method}
             </div>
             {res.candidates.length === 0 ? (
-              <p className="text-slate-400">No substitution above the probability threshold.</p>
+              <p className="text-fg-3">No substitution above the probability threshold.</p>
             ) : (
-              <table className="w-full font-mono text-[10.5px] tabular-nums">
-                <thead className="text-slate-500">
+              <table className="w-full font-mono text-xs tabular-nums">
+                <thead className="text-fg-4">
                   <tr>
                     <th className="text-left font-normal">#</th>
                     <th className="text-left font-normal">formula</th>
@@ -487,27 +487,27 @@ export function PrototypeDialog() {
                 </thead>
                 <tbody>
                   {res.candidates.map((c) => (
-                    <tr key={`${c.rank}-${c.source_material_id}`} className="border-t border-white/[0.04]">
-                      <td className="text-slate-500">{c.rank}</td>
-                      <td className="text-slate-100">
+                    <tr key={`${c.rank}-${c.source_material_id}`} className="border-t border-line-soft">
+                      <td className="text-fg-4">{c.rank}</td>
+                      <td className="text-fg">
                         <FormulaText formula={c.formula} />
                       </td>
-                      <td className="text-slate-300">
-                        <a className="text-cyan-200 hover:underline" href={`https://next-gen.materialsproject.org/materials/${c.source_material_id}`} target="_blank" rel="noreferrer">
+                      <td className="text-fg-2">
+                        <a className="text-fg underline decoration-fg-5 underline-offset-2 hover:decoration-fg-3" href={`https://next-gen.materialsproject.org/materials/${c.source_material_id}`} target="_blank" rel="noreferrer">
                           {c.source_material_id}
                         </a>{" "}
                         <FormulaText formula={c.source_formula} />
                       </td>
-                      <td className="text-slate-300">{substitutionText(c.substitutions)}</td>
-                      <td className="text-right text-slate-300">{c.probability < 0.01 ? c.probability.toExponential(1) : c.probability.toFixed(3)}</td>
-                      <td className="pl-1.5 text-slate-200">{c.spacegroup_symbol}</td>
-                      <td className={cx("text-right", c.e_hull_ev != null && c.e_hull_ev * 1000 < 25 ? "text-emerald-300" : "text-slate-200")} title={c.relaxed ? "relaxed" : "unrelaxed"}>
+                      <td className="text-fg-2">{substitutionText(c.substitutions)}</td>
+                      <td className="text-right text-fg-2">{c.probability < 0.01 ? c.probability.toExponential(1) : c.probability.toFixed(3)}</td>
+                      <td className="pl-1.5 text-fg">{c.spacegroup_symbol}</td>
+                      <td className={cx("text-right", c.e_hull_ev != null && c.e_hull_ev * 1000 < 25 ? "text-ok" : "text-fg")} title={c.relaxed ? "relaxed" : "unrelaxed"}>
                         {c.e_hull_ev != null ? `${(c.e_hull_ev * 1000).toFixed(0)} meV` : "—"}
-                        {!c.relaxed && <span className="text-amber-300">*</span>}
+                        {!c.relaxed && <span className="text-warn">*</span>}
                       </td>
                       <td className="text-right">
                         <Button
-                          className="px-1.5 py-0 text-[10px]"
+                          className="px-1.5 py-0 text-2xs"
                           disabled={!connected || busy}
                           onClick={() => {
                             if (commands.loadCrystal(c.crystal)) close();
@@ -521,7 +521,7 @@ export function PrototypeDialog() {
                 </tbody>
               </table>
             )}
-            {res.candidates.some((c) => !c.relaxed) && <p className="mt-0.5 text-[9.5px] text-amber-300/90">* unrelaxed: E_hull includes strain energy.</p>}
+            {res.candidates.some((c) => !c.relaxed) && <p className="mt-0.5 text-2xs text-warn/90">* unrelaxed: E_hull includes strain energy.</p>}
           </div>
         )}
       </div>

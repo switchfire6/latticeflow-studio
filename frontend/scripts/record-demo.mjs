@@ -168,14 +168,14 @@ async function storyboard() {
   await still("loaded");
 
   await caption("1 · Relax the cell and the atoms");
-  await clickButton("FIRE Relax");
+  await clickButton("Relax (FIRE");
   await sleep(600);
   await until(`${S}.streams.length === 0`, 60000, "the relaxation");
   await sleep(1800);
   await still("relaxed");
 
-  await caption("2 · Phonon shake-test: is it dynamically stable?");
-  await clickButton("Run Phonon Shake-Test");
+  await caption("2 · Phonons: is it dynamically stable?");
+  await clickButton("Run phonons");
   await until(`!!${S}.phonon`, 180000, "the phonons");
   await sleep(600);
   await caption("Imaginary modes: cubic SrTiO₃ is unstable at 0 K");
@@ -199,7 +199,7 @@ async function storyboard() {
   await still("mode");
 
   await caption("4 · Follow the instability into the distorted phase");
-  await clickButton("Follow Instability");
+  await clickButton("Follow instability");
   await sleep(1000);
   await until(`${S}.streams.length === 0 && ${S}.followResult?.status !== 'running'`, 240000, "follow instability");
   await sleep(1200);

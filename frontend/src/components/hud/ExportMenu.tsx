@@ -36,12 +36,12 @@ export function ExportMenu({ items, title = "Export" }: { items: ExportItem[]; t
         aria-expanded={open}
         disabled={!any}
         onClick={() => setOpen((o) => !o)}
-        className={cx("rounded p-0.5 text-slate-500 hover:text-cyan-200 disabled:opacity-30", open && "text-cyan-200")}
+        className={cx("rounded-ctl p-0.5 text-fg-4 hover:text-fg disabled:opacity-30", open && "text-accent-fg")}
       >
         <Download size={12} />
       </button>
       {open && (
-        <div className="absolute top-full right-0 z-50 mt-1 min-w-[190px] rounded-lg border border-white/10 bg-slate-950/95 p-1 shadow-[0_8px_32px_rgba(0,0,0,0.5)] backdrop-blur-md" role="menu">
+        <div className="absolute top-full right-0 z-50 mt-1 min-w-[190px] rounded-ctl border border-line bg-surface p-1 shadow-lg shadow-black/40" role="menu">
           {items.map((it) => (
             <button
               key={it.label}
@@ -53,7 +53,7 @@ export function ExportMenu({ items, title = "Export" }: { items: ExportItem[]; t
                 setOpen(false);
                 it.run();
               }}
-              className="block w-full rounded px-2 py-1 text-left font-mono text-[10.5px] text-slate-300 hover:bg-cyan-400/10 hover:text-cyan-100 disabled:opacity-35"
+              className="block w-full rounded-ctl px-2 py-1 text-left text-xs text-fg-2 hover:bg-hover hover:text-fg disabled:opacity-35"
             >
               {it.label}
             </button>
@@ -74,7 +74,7 @@ export function usePaneExportItems(pane: DockPane, bodyRef: RefObject<HTMLElemen
   const files = paneCsvFiles(pane, st, currentFrequencyUnit());
   const fail = () => st.pushToast("warning", "Nothing to export", "This pane has no chart to render yet.");
   const png = (publication: boolean): ExportItem => ({
-    label: publication ? "PNG · publication (white, 2×)" : "PNG (2×)",
+    label: publication ? "PNG · publication (white, 2×)" : "PNG · dark (2×)",
     disabled: pane === "elastic",
     run: () => {
       const el = bodyRef.current;
@@ -84,8 +84,8 @@ export function usePaneExportItems(pane: DockPane, bodyRef: RefObject<HTMLElemen
   });
   return [
     ...(files.length ? files.map((f) => ({ label: f.label, run: () => downloadCsv(f) })) : [{ label: "CSV", disabled: true, run: () => {} }]),
-    png(false),
     png(true),
+    png(false),
     ...extra,
   ];
 }

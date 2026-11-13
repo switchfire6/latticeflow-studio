@@ -9,8 +9,9 @@
  * and the phonon displacement of the exact image they belong to.
  *
  * Colour: brushed metallic slate at equilibrium, a diverging blue (compressed)
- * → amber (stretched) map by strain_ratio, and bonds flagged is_unstable pulse
- * emissive crimson #FF2A54 (HDR, so they bloom).
+ * → orange (stretched) map by strain_ratio (never the status red), and bonds
+ * flagged is_unstable (imaginary-mode actors) are drawn in a muted, lit rose
+ * (UNSTABLE_TINT): flagged, but not the saturated status red of a failure.
  *
  * Phase C1: with display.bondColoring = "valence" the same diverging map
  * shows the bond-valence deviation (length − ideal) / ideal from
@@ -25,7 +26,7 @@ import type { Vec3 } from "../../utils/latticeMath";
 import { getDisplaySet } from "./displaySet";
 import { alignIdeals } from "../../utils/localStructure";
 import type { BondEdge } from "../../types/protocol";
-import { COLORS, HALO_OPACITY, bondValenceColor, growCapacity, strainColor, writeSegment } from "./sceneUtils";
+import { HALO_OPACITY, UNSTABLE_TINT, bondValenceColor, growCapacity, strainColor, writeSegment } from "./sceneUtils";
 
 export const BOND_RADIUS = 0.1;
 
@@ -56,7 +57,7 @@ export function InstancedBonds() {
     () => new THREE.MeshStandardMaterial({ roughness: 0.26, metalness: 0.7, envMapIntensity: 1.2 }),
     [],
   );
-  const unstableMaterial = useMemo(() => new THREE.MeshBasicMaterial({ color: COLORS.crimson.clone(), toneMapped: false }), []);
+  const unstableMaterial = useMemo(() => new THREE.MeshStandardMaterial({ color: UNSTABLE_TINT.clone(), metalness: 0.3, roughness: 0.5 }), []);
   const haloMaterial = useMemo(
     () =>
       new THREE.MeshStandardMaterial({
@@ -78,7 +79,7 @@ export function InstancedBonds() {
     [cylinder, material, unstableMaterial, haloMaterial],
   );
 
-  useFrame(({ clock }) => {
+  useFrame(() => {
     const f = useCrystalStore.getState().frame;
     const ds = getDisplaySet(f, ghostHalo);
     const segs = ds.bonds;
@@ -120,7 +121,7 @@ export function InstancedBonds() {
       }
       if (sgm.ghost) {
         writeSegment(halo, h, _a[0], _a[1], _a[2], dx, dy, dz, BOND_RADIUS, true);
-        halo.setColorAt(h, bond.is_unstable ? COLORS.crimson : colorOf(sgm.bond, bond));
+        halo.setColorAt(h, bond.is_unstable ? UNSTABLE_TINT : colorOf(sgm.bond, bond));
         h++;
       } else if (bond.is_unstable) {
         writeSegment(unstable, u++, _a[0], _a[1], _a[2], dx, dy, dz, BOND_RADIUS * 1.15, true);
@@ -138,8 +139,6 @@ export function InstancedBonds() {
     halo.count = h;
     halo.instanceMatrix.needsUpdate = true;
     if (halo.instanceColor) halo.instanceColor.needsUpdate = true;
-    const pulse = 0.5 + 0.5 * Math.sin(clock.elapsedTime * 5.0);
-    unstableMaterial.color.copy(COLORS.crimson).multiplyScalar(1.0 + 1.8 * pulse);
   });
 
   return (

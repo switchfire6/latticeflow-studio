@@ -127,7 +127,8 @@ export async function exportPanePng(root: HTMLElement, filename: string, publica
   const top = Math.min(...rects.map((r) => r.top));
   const right = Math.max(...rects.map((r) => r.right));
   const bottom = Math.max(...rects.map((r) => r.bottom));
-  const charts: RenderedChart[] = canvases.map((c, i) => ({ canvas: chartRenderer(c)!(dpr), x: rects[i]!.left - left, y: rects[i]!.top - top }));
+  const theme = publication ? "publication" : "dark";
+  const charts: RenderedChart[] = canvases.map((c, i) => ({ canvas: chartRenderer(c)!(dpr, theme), x: rects[i]!.left - left, y: rects[i]!.top - top }));
   const out = compositeCharts(charts, right - left, bottom - top, dpr, publication);
   const blob = await new Promise<Blob | null>((resolve) => out.toBlob(resolve, "image/png"));
   if (!blob) return false;

@@ -108,7 +108,7 @@ export function App() {
           {CrystalCanvas ? (
             <CrystalCanvas />
           ) : (
-            <div className="absolute inset-0 grid place-items-center font-mono text-[12px] text-slate-500">loading 3D engine…</div>
+            <div className="absolute inset-0 grid place-items-center text-sm text-fg-4">loading 3D engine…</div>
           )}
           <div className="pointer-events-none absolute inset-0">
             {/* max-w keeps the column clear of the 310 px scorecard (+ margins) at 1280 px */}
@@ -128,7 +128,7 @@ export function App() {
             </div>
             {!hasCrystal && (
               <div className="absolute inset-0 grid place-items-center">
-                <div className="text-center font-mono text-[12px] text-slate-500">
+                <div className="text-center text-sm text-fg-4">
                   {connection === "open" ? "loading structure…" : "connecting to the LatticeFlow backend (uvicorn :8000)…"}
                 </div>
               </div>

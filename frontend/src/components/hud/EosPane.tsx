@@ -20,8 +20,8 @@ export const CLAMPED_ION_NOTE = "Clamped-ion: atoms are scaled with the cell, no
 function R({ label, value, title, warn }: { label: string; value: string; title?: string; warn?: boolean }) {
   return (
     <div className="flex items-baseline justify-between gap-2" title={title}>
-      <span className="text-slate-500">{label}</span>
-      <span className={cx("tabular-nums", warn ? "text-amber-300" : "text-slate-100")}>{value}</span>
+      <span className="text-fg-4">{label}</span>
+      <span className={cx("tabular-nums", warn ? "text-warn" : "text-fg")}>{value}</span>
     </div>
   );
 }
@@ -44,7 +44,7 @@ export function EosReadouts({
   const r = eos.result;
   const n = Math.max(1, eos.nAtoms);
   return (
-    <div className="flex h-full w-[190px] shrink-0 flex-col gap-1 overflow-y-auto border-r border-white/[0.06] pr-3 font-mono text-[10.5px]" data-eos-readouts>
+    <div className="flex h-full w-[190px] shrink-0 flex-col gap-1 overflow-y-auto border-r border-line-soft pr-3 font-mono text-xs" data-eos-readouts>
       <R label="K(V0)" value={num(r.k_gpa, 1, " GPa")} title="K = V d²E/dV² at the given volume" />
       <R label="K from P(V)" value={num(r.k_stress_gpa, 1, " GPa")} title="−V dP/dV from the stresses (cross-check)" />
       <R label="B0 (BM, at V_eq)" value={num(r.k_eq_gpa, 1, " GPa")} />
@@ -58,12 +58,12 @@ export function EosReadouts({
       />
       {r.v_eq != null && <R label="ΔV (V_eq vs V0)" value={`${(((r.v_eq - r.v0) / r.v0) * 100).toFixed(2)} %`} />}
       <R label="P(V0)" value={formatPressure(r.pressure_gpa, pressureUnit)} />
-      {stale && <p className="text-amber-300/80">Structure changed since this fit; recompute.</p>}
-      <p className="mt-1 leading-snug text-slate-500">{r.method}</p>
-      <p className="leading-snug text-slate-500">{CLAMPED_ION_NOTE}</p>
+      {stale && <p className="text-warn/80">Structure changed since this fit; recompute.</p>}
+      <p className="mt-1 leading-snug text-fg-4">{r.method}</p>
+      <p className="leading-snug text-fg-4">{CLAMPED_ION_NOTE}</p>
       <FallbackTag className="self-start" />
       {onRefit && (
-        <Button className="mt-1 self-start px-2 py-0.5 text-[10px]" disabled={refitDisabled} onClick={onRefit} title="Refit over ±6 % (9 points) for a better B0′ and V_eq">
+        <Button className="mt-1 self-start px-2 py-0.5 text-2xs" disabled={refitDisabled} onClick={onRefit} title="Refit over ±6 % (9 points) for a better B0′ and V_eq">
           <Gauge size={10} /> Refit over ±6 %
         </Button>
       )}
@@ -79,7 +79,7 @@ export function EosPane() {
   const pressureUnit = useSettings((s) => s.units.pressure);
   if (!eos) {
     return (
-      <div className="grid h-full w-full place-items-center text-[11px] text-slate-500">
+      <div className="grid h-full w-full place-items-center text-xs text-fg-4">
         <div className="text-center">
           <p className="mb-2">Compute the bulk modulus to see E(V) and P(V).</p>
           <Button disabled={!connected || pending} onClick={() => commands.computeBulkModulus()}>
@@ -93,7 +93,7 @@ export function EosPane() {
   const pts = eosPoints(r, eos.nAtoms);
   const vs = pts.map((p) => p.volume);
   const markers = [
-    { x: r.v0, label: "V0", color: "rgba(226, 232, 240, 0.7)" },
+    { x: r.v0, label: "V0", color: CHART_COLORS.ink },
     ...(r.v_eq != null ? [{ x: r.v_eq, label: r.extrapolated ? "V_eq (extrap.)" : "V_eq", color: CHART_COLORS.amber, dashed: true, labelAt: "bottom" as const }] : []),
   ];
   const vLo = Math.min(...vs, r.v_eq ?? Infinity);

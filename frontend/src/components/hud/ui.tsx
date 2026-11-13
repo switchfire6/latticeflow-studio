@@ -1,4 +1,4 @@
-/** Small glassmorphic HUD primitives shared by the panels. */
+/** Small HUD primitives shared by the panels; colours, sizes and radii come from the tokens in index.css. */
 import { ChevronDown, ChevronRight } from "lucide-react";
 import { useState, type ButtonHTMLAttributes, type ReactNode } from "react";
 import { useSettings } from "../../store/settings";
@@ -19,14 +19,10 @@ export function cx(...parts: (string | false | null | undefined)[]): string {
   return parts.filter(Boolean).join(" ");
 }
 
-export function Panel({ className, children }: { className?: string; children: ReactNode }) {
+/** Opaque surface. `floating` (viewport overlays, popovers) adds a small neutral shadow. */
+export function Panel({ className, floating, children }: { className?: string; floating?: boolean; children: ReactNode }) {
   return (
-    <div
-      className={cx(
-        "rounded-xl border border-white/[0.08] bg-slate-950/70 shadow-[0_8px_32px_rgba(0,0,0,0.45)] backdrop-blur-md",
-        className,
-      )}
-    >
+    <div className={cx("rounded-panel border border-line bg-surface", floating && "shadow-md shadow-black/40", className)}>
       {children}
     </div>
   );
@@ -35,7 +31,7 @@ export function Panel({ className, children }: { className?: string; children: R
 export function SectionTitle({ children, right }: { children: ReactNode; right?: ReactNode }) {
   return (
     <div className="mb-2 flex items-center justify-between">
-      <h3 className="text-[10px] font-semibold tracking-[0.18em] text-slate-400 uppercase">{children}</h3>
+      <h3 className="text-2xs font-semibold tracking-[0.06em] text-fg-3 uppercase">{children}</h3>
       {right}
     </div>
   );
@@ -44,12 +40,11 @@ export function SectionTitle({ children, right }: { children: ReactNode; right?:
 type Variant = "primary" | "danger" | "ghost" | "subtle" | "warning";
 
 const VARIANTS: Record<Variant, string> = {
-  primary:
-    "bg-gradient-to-r from-cyan-500/90 to-sky-500/90 text-slate-950 hover:from-cyan-400 hover:to-sky-400 shadow-[0_0_18px_rgba(34,211,238,0.35)]",
-  danger: "bg-rose-500/90 text-white hover:bg-rose-400 shadow-[0_0_18px_rgba(255,42,84,0.35)]",
-  warning: "bg-amber-400/90 text-slate-950 hover:bg-amber-300",
-  ghost: "border border-white/10 bg-white/[0.03] text-slate-200 hover:border-cyan-400/40 hover:bg-cyan-400/10",
-  subtle: "text-slate-300 hover:bg-white/5",
+  primary: "bg-fg font-semibold text-canvas hover:bg-white",
+  danger: "bg-bad font-semibold text-white hover:bg-bad/85",
+  warning: "border border-warn/50 bg-warn/10 text-warn hover:bg-warn/20",
+  ghost: "border border-line bg-raised text-fg hover:border-line-strong hover:bg-hover",
+  subtle: "text-fg-2 hover:bg-hover",
 };
 
 export function Button({
@@ -62,7 +57,7 @@ export function Button({
     <button
       type="button"
       className={cx(
-        "inline-flex items-center justify-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-medium transition-colors disabled:cursor-not-allowed disabled:opacity-40",
+        "inline-flex items-center justify-center gap-1.5 rounded-ctl px-3 py-1.5 text-sm font-medium outline-none focus-visible:ring-2 focus-visible:ring-accent transition-colors disabled:cursor-not-allowed disabled:opacity-40",
         VARIANTS[variant],
         className,
       )}
@@ -78,10 +73,11 @@ export function Toggle({ label, checked, onChange, title }: { label: string; che
     <button
       type="button"
       title={title}
+      aria-pressed={checked}
       onClick={() => onChange(!checked)}
       className={cx(
-        "rounded-md border px-2 py-1 text-[11px] font-medium transition-colors",
-        checked ? "border-cyan-400/50 bg-cyan-400/15 text-cyan-100" : "border-white/10 bg-white/[0.02] text-slate-400 hover:text-slate-200",
+        "rounded-ctl px-2 py-1 text-xs font-medium transition-colors outline-none focus-visible:ring-2 focus-visible:ring-accent",
+        checked ? "bg-accent-soft text-accent-fg" : "text-fg-3 hover:bg-hover hover:text-fg",
       )}
     >
       {label}
@@ -112,10 +108,10 @@ export function Slider({
 }) {
   return (
     <label className={cx("block", disabled && "opacity-45")}>
-      <div className="mb-1 flex items-center justify-between text-[11px] text-slate-400">
+      <div className="mb-1 flex items-center justify-between text-xs text-fg-3">
         <span>{label}</span>
         <span className="flex items-center gap-2">
-          <span className="font-mono text-slate-200 tabular-nums">{format(value)}</span>
+          <span className="font-mono text-fg tabular-nums">{format(value)}</span>
           {right}
         </span>
       </div>
@@ -133,21 +129,20 @@ export function Slider({
   );
 }
 
-export function Badge({ tone, children, pulse, title }: { tone: "green" | "amber" | "red" | "slate" | "cyan"; children: ReactNode; pulse?: boolean; title?: string }) {
+export function Badge({ tone, children, title }: { tone: "green" | "amber" | "red" | "slate" | "cyan"; children: ReactNode; title?: string }) {
   const tones = {
-    green: "border-emerald-400/40 bg-emerald-400/10 text-emerald-300",
-    amber: "border-amber-400/40 bg-amber-400/10 text-amber-300",
-    red: "border-rose-500/50 bg-rose-500/15 text-rose-300 shadow-[0_0_14px_rgba(255,42,84,0.35)]",
-    slate: "border-white/10 bg-white/5 text-slate-300",
-    cyan: "border-cyan-400/40 bg-cyan-400/10 text-cyan-200",
+    green: "border-ok/40 bg-ok/10 text-ok",
+    amber: "border-warn/40 bg-warn/10 text-warn",
+    red: "border-bad/50 bg-bad/15 text-bad",
+    slate: "border-line bg-raised text-fg-2",
+    cyan: "border-line-strong bg-raised text-fg",
   } as const;
   return (
     <span
       title={title}
       className={cx(
-        "inline-flex items-center gap-1 rounded-md border px-1.5 py-0.5 font-mono text-[10px] font-semibold tracking-wide whitespace-nowrap normal-case",
+        "inline-flex items-center gap-1 rounded-ctl border px-1.5 py-px text-2xs font-semibold whitespace-nowrap normal-case",
         tones[tone],
-        pulse && "lf-pulse-red",
       )}
     >
       {children}
@@ -180,7 +175,7 @@ export function CollapsibleCard({
           type="button"
           aria-expanded={open}
           onClick={() => useSettings.getState().setCollapsed(id, open)}
-          className="flex items-center gap-1.5 text-[10px] font-semibold tracking-[0.18em] text-slate-400 uppercase hover:text-slate-200"
+          className="flex items-center gap-1.5 text-2xs font-semibold tracking-[0.06em] text-fg-3 uppercase hover:text-fg"
         >
           {open ? <ChevronDown size={12} /> : <ChevronRight size={12} />}
           {title}
@@ -193,7 +188,7 @@ export function CollapsibleCard({
 }
 
 export const inputCls =
-  "w-full rounded-lg border border-white/10 bg-slate-900/80 px-2 py-1.5 font-mono text-[12px] text-slate-100 outline-none focus:border-cyan-400/50";
+  "w-full rounded-ctl border border-line bg-field px-2 py-1.5 text-sm text-fg outline-none focus:border-accent";
 
 /** Labelled numeric field that commits on blur / Enter (keeps a free-text draft while typing). */
 export function NumberField({
@@ -229,11 +224,11 @@ export function NumberField({
     if (clamped !== value) onCommit(clamped);
   };
   return (
-    <label className={cx("flex items-center justify-between gap-2 text-[11px] text-slate-400", disabled && "opacity-45")} title={title}>
+    <label className={cx("flex items-center justify-between gap-2 text-xs text-fg-3", disabled && "opacity-45")} title={title}>
       <span className="min-w-0 truncate">{label}</span>
       <span className="flex items-center gap-1">
         <input
-          className="w-[68px] rounded border border-white/10 bg-slate-900/80 px-1.5 py-0.5 text-right font-mono text-[11px] text-slate-100 outline-none focus:border-cyan-400/50"
+          className="w-[68px] rounded-ctl border border-line bg-field px-1.5 py-0.5 text-right font-mono text-xs text-fg outline-none focus:border-accent"
           inputMode={integer ? "numeric" : "decimal"}
           value={draft ?? String(value)}
           step={step}
@@ -245,7 +240,7 @@ export function NumberField({
             if (e.key === "Escape") setDraft(null);
           }}
         />
-        {unit && <span className="w-9 font-mono text-[10px] text-slate-500">{unit}</span>}
+        {unit && <span className="w-9 font-mono text-2xs text-fg-4">{unit}</span>}
       </span>
     </label>
   );
@@ -264,7 +259,7 @@ export function Segmented<T extends string>({
   title?: string;
 }) {
   return (
-    <span className="inline-flex rounded-md border border-white/10 bg-white/[0.02] p-0.5" title={title}>
+    <span className="inline-flex rounded-ctl border border-line bg-raised p-0.5" title={title}>
       {options.map((o) => (
         <button
           key={o.value}
@@ -273,8 +268,8 @@ export function Segmented<T extends string>({
           disabled={o.disabled}
           onClick={() => onChange(o.value)}
           className={cx(
-            "rounded px-1.5 py-0.5 font-mono text-[10px] transition-colors disabled:opacity-30",
-            o.value === value ? "bg-cyan-400/20 text-cyan-100" : "text-slate-400 hover:text-slate-200",
+            "rounded-ctl px-1.5 py-0.5 text-2xs transition-colors disabled:opacity-30",
+            o.value === value ? "bg-accent-soft text-accent-fg" : "text-fg-3 hover:text-fg",
           )}
         >
           {o.label}
@@ -298,7 +293,7 @@ export function FallbackTagView({ active, compact, className }: { active: boolea
   return (
     <span
       className={cx(
-        "inline-flex items-center gap-1 rounded border border-amber-400/50 bg-amber-400/15 px-1 py-px font-mono text-[9px] font-semibold tracking-wide whitespace-nowrap text-amber-300 uppercase",
+        "inline-flex items-center gap-1 rounded-ctl border border-warn/50 bg-warn/15 px-1 py-px text-2xs font-semibold whitespace-nowrap text-warn",
         className,
       )}
       title="MACE could not be loaded; the backend uses a Lennard-Jones fallback. Numbers are not physical."

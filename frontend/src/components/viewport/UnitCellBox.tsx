@@ -98,7 +98,7 @@ export function UnitCellBox() {
         (["a", "b", "c"] as const).map((label, k) => (
           <group key={label} ref={labelRefs[k]}>
             <Html center zIndexRange={[10, 0]} style={{ pointerEvents: "none" }}>
-              <span className="font-mono text-[11px] font-semibold italic" style={{ color: `#${AXIS_COLORS[k]!.getHexString()}` }}>
+              <span className="font-mono text-xs font-semibold italic" style={{ color: `#${AXIS_COLORS[k]!.getHexString()}` }}>
                 {label}
               </span>
             </Html>

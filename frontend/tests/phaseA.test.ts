@@ -860,9 +860,9 @@ describe("views", () => {
   const render = (el: Parameters<typeof renderToStaticMarkup>[0]) => renderToStaticMarkup(el);
 
   it("RelaxationBadge shows the three states", () => {
-    expect(render(createElement(RelaxationBadge, { verdict: relaxationVerdict(stressed(0)) }))).toContain("RELAXED");
-    expect(render(createElement(RelaxationBadge, { verdict: relaxationVerdict(stressed(-5.1)) }))).toContain("FORCES OK · CELL STRESSED");
-    expect(render(createElement(RelaxationBadge, { verdict: relaxationVerdict(stressed(0, { maxForce: 1 })) }))).toContain("UNRELAXED");
+    expect(render(createElement(RelaxationBadge, { verdict: relaxationVerdict(stressed(0)) }))).toContain("Relaxed");
+    expect(render(createElement(RelaxationBadge, { verdict: relaxationVerdict(stressed(-5.1)) }))).toContain("Forces OK · cell stressed");
+    expect(render(createElement(RelaxationBadge, { verdict: relaxationVerdict(stressed(0, { maxForce: 1 })) }))).toContain("Unrelaxed");
   });
 
   it("the stress tooltip lists P and the Voigt tensor", () => {
@@ -896,7 +896,7 @@ describe("views", () => {
     expect(html).toContain("cubic");
     expect(html).toContain("0.01 Å");
     expect(html).toContain("+5.10 GPa");
-    expect(html).toContain("FORCES OK · CELL STRESSED");
+    expect(html).toContain("Forces OK · cell stressed");
     expect(html).toContain("Change since the relaxation start");
     expect(html).toContain("+1.01 %"); // Δa = 4.0/3.96 − 1
     expect(html).toContain("1a");

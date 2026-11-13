@@ -8,15 +8,18 @@ import * as THREE from "three";
 export const HALO_OPACITY = 0.22;
 
 export const COLORS = {
-  background: "#07090E",
-  cyan: new THREE.Color("#22D3EE"),
-  crimson: new THREE.Color("#FF2A54"),
+  background: "#0E1013",
+  cyan: new THREE.Color("#3FB0C9"), // UI accent (hover / selection)
+  crimson: new THREE.Color("#E5534B"), // status: imaginary-mode actors only
   slate: new THREE.Color("#8792A6"),
-  compressed: new THREE.Color("#3B82F6"),
-  stretched: new THREE.Color("#F5A524"),
+  compressed: new THREE.Color("#3987E5"),
+  stretched: new THREE.Color("#E0823D"), // orange, kept clear of the status red
   emerald: new THREE.Color("#10B981"),
   neonOrange: new THREE.Color("#FF6A1A"),
 };
+
+/** Bonds of imaginary-mode actors: crimson muted halfway to the neutral slate. */
+export const UNSTABLE_TINT = new THREE.Color("#E5534B").lerp(new THREE.Color("#8792A6"), 0.45);
 
 /** Next capacity (power of two, at least `min`) for growing instance buffers. */
 export function growCapacity(needed: number, min = 64): number {
@@ -71,7 +74,7 @@ export function writeSegment(
   return true;
 }
 
-/** Diverging strain colormap: blue (compressed) <- slate (equilibrium) -> amber (stretched). */
+/** Diverging strain colormap: blue (compressed) <- slate (equilibrium) -> orange (stretched); never the status red. */
 export const STRAIN_DEADBAND = 0.04;
 export const STRAIN_SATURATION = 0.2;
 export function strainColor(strain: number, out: THREE.Color): THREE.Color {
@@ -227,7 +230,7 @@ export function createEmissiveInstanceMaterial(emissiveGain: number, params: THR
   return Object.assign(mat, { emissiveUniforms: uniforms });
 }
 
-/** Radial-gradient background texture (#07090E edges), used as scene.background so it survives post-processing. */
+/** Radial-gradient background texture (canvas-token edges), used as scene.background so it survives post-processing. */
 export function createBackgroundTexture(): THREE.Texture {
   const size = 512;
   const canvas = document.createElement("canvas");
@@ -235,8 +238,8 @@ export function createBackgroundTexture(): THREE.Texture {
   canvas.height = size;
   const ctx = canvas.getContext("2d")!;
   const g = ctx.createRadialGradient(size * 0.5, size * 0.42, 0, size * 0.5, size * 0.5, size * 0.72);
-  g.addColorStop(0, "#151c2b");
-  g.addColorStop(0.45, "#0c111b");
+  g.addColorStop(0, "#1a1d23");
+  g.addColorStop(0.45, "#121418");
   g.addColorStop(1, COLORS.background);
   ctx.fillStyle = g;
   ctx.fillRect(0, 0, size, size);
