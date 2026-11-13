@@ -14,6 +14,8 @@ studio = Studio("http://localhost:8000")
 
 For the protocol behind each call, see [`protocol.md`](protocol.md).
 
+**Keeping results.** Structures and results can be kept in the project library (the **Library** panel; `studio.save_structure()` in Python). Everything the job queue computes lands there automatically (workflow 6). For interactive work, tick **Auto-save results** in the Library panel.
+
 ---
 
 ## 1. Soft-mode phase transition (SrTiO3: Pm-3m → I4/mcm)
@@ -133,9 +135,45 @@ The studio has two routes to candidate structures:
 
 **Batch screening.** `latticeflow-screen compositions.csv --out results.csv --elastic [--hull]` runs, for each candidate: generate (`--top-k`), relax, primitive-cell phonons, then E_hull and the elastic tensor (K_VRH, G_VRH, Born stability) if requested. It writes one row per candidate. A failure is recorded in the row's `error` column, and the batch continues.
 
+Add `--queue [--project NAME]` to run the per-candidate steps in the server's job queue instead (workflow 6). Only the generation uses the session. The candidates and all their results land in the library project (default `Screening`, created if missing), and the table is built from the stored summaries.
+
 Rank candidates by three gates:
 - dynamically stable (no imaginary modes);
 - Born stable;
 - E_hull ≲ 50–100 meV/atom (model-dependent; MACE errors are of that order).
 
 Then confirm the survivors with a larger model and, ideally, DFT. See `clients/python/examples/screening.py`.
+
+## 6. Batch screening with the job queue
+
+The job queue runs calculations in the background, on the server, for many structures at once. Each structure gets a **chain** of steps, for example relax → phonons → elastic → hull. Every later step runs on the relaxed structure. Every result is written into the project library as soon as it finishes, with the relaxed structure saved as a child of its input. The queue has one worker and gives way to interactive work: while a session computes, no job starts and a running job pauses.
+
+**In the UI**
+1. In the **Library** panel, pick or create a project and add the structures: load each one and click **Save current**, or import a project bundle.
+2. Open the job queue with the **Jobs** button in the top bar. Under **New batch**, tick the structures (or **Current structure**, which is saved first).
+3. Pick a preset, for example **Relax → Phonons → Elastic → Hull**, or tick the steps. **Follow if unstable** follows the softest imaginary mode and is skipped when the phonons are stable. The steps use your current settings for each calculation.
+4. Click **Queue N chains**. The drawer shows each chain's progress. You can reorder or cancel chains; cancelling a step cancels the rest of its chain.
+5. Open the **results** table from the Library panel to sort and plot the summaries. Click a structure to open it with its stored results, without recomputing.
+
+**In Python**
+```python
+from latticeflow_client import job_step
+
+pid = studio.create_project("Perovskites")["id"]
+ids = []
+for preset in ("srtio3", "batio3"):
+    studio.load(preset=preset)
+    ids.append(studio.save_structure(pid)["id"])          # or save_structure(pid, crystal=..., atoms=..., structure=...)
+
+jobs = studio.submit_jobs(pid, ids, [job_step("relax", fmax=0.01), "phonons", "elastic"])
+studio.wait_jobs(jobs, on_progress=lambda j: print(j["id"], j["kind"], j["status"], j["message"]))
+
+for row in studio.structures(pid):                          # inputs and their relaxed children
+    print(row["name"], row["origin"], row["latest"].get("min_frequency_thz"), row["latest"].get("k_vrh_gpa"))
+```
+- `latest` merges the newest summary of each result kind. Fetch the full data (the band structure, the elastic tensor and so on) with `studio.result(row["latest_result_ids"]["phonons"])`.
+- `studio.load_structure(structure_id)` opens a saved structure in the session.
+- The jobs survive the script: `wait_jobs()` only polls, and an interrupted wait leaves them running. `studio.jobs(pid, active=True)` lists the unfinished ones; `cancel_job(id)` stops one.
+- `export_project(pid, "perovskites.json")` and `import_project(path)` move a project, with its lineage and results, between machines.
+
+From the command line, `latticeflow-screen compositions.csv --out results.csv --queue --project Perovskites --elastic` does the same for generated candidates.

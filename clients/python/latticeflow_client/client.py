@@ -14,6 +14,15 @@ and blocks until the command's documented terminal sequence has arrived
 (:mod:`latticeflow_client.protocol`). Calls are serialised (one command at a time
 per session); :meth:`stop` may be called from another thread or from an
 ``on_frame`` / ``on_progress`` callback.
+
+The project library and the job queue are plain REST (no session needed; works
+with ``connect=False``)::
+
+    pid = studio.create_project("Perovskites")["id"]
+    sid = studio.save_structure(pid)["id"]                       # the active structure
+    chain = studio.submit_jobs(pid, [sid], ["relax", "phonons"])
+    studio.wait_jobs(chain)
+    print(studio.structures(pid)[-1]["latest"])                   # the relaxed child's summaries
 """
 
 from __future__ import annotations
@@ -33,10 +42,12 @@ from latticeflow_client import protocol as P
 from latticeflow_client.errors import StreamStopped, StudioConnectionError, StudioError, StudioTimeout
 from latticeflow_client.structures import (
     Crystal,
+    ase_to_cif,
     ase_to_extxyz,
     crystal_to_ase,
     crystal_to_pymatgen,
     parse_formula,
+    pymatgen_to_cif,
     pymatgen_to_extxyz,
 )
 
@@ -670,6 +681,171 @@ class Studio:
             with open(path, "w", encoding="utf-8") as fh:
                 fh.write(text)
         return text
+
+    # ================================================================ project library (REST, protocol §6)
+    # Shared by every session and the job queue; nothing here changes the session
+    # (except load_structure). Ids are ints; dicts follow docs/protocol.md §6.
+    def projects(self) -> List[Dict[str, Any]]:
+        """``GET /api/projects`` -> ``Project[]`` (the default project "Scratch" first)."""
+        return self._rest("GET", "/api/projects").json()
+
+    def create_project(self, name: str) -> Dict[str, Any]:
+        """``POST /api/projects`` -> the new ``Project`` (names need not be unique)."""
+        return self._rest("POST", "/api/projects", json={"name": name}).json()
+
+    def delete_project(self, project_id: int) -> None:
+        """``DELETE /api/projects/{id}`` with its structures, results and finished jobs.
+        ``StudioError`` INVALID_OPERATION (409) for the default project or while it has active jobs."""
+        self._rest("DELETE", f"/api/projects/{int(project_id)}")
+
+    def save_structure(self, project_id: int, crystal: Optional[Crystal] = None, *, atoms: Any = None,
+                       structure: Any = None, name: Optional[str] = None, parent_id: Optional[int] = None,
+                       origin: Optional[str] = None, notes: Optional[str] = None) -> Dict[str, Any]:
+        """``POST /api/projects/{id}/structures`` -> ``Structure``.
+
+        Saves the session's active structure, or ``crystal`` (a payload dict), ``atoms`` (``ase.Atoms``) or
+        ``structure`` (pymatgen ``Structure``); objects are converted with the stateless ``POST
+        /api/import/cif``, so the session is not touched. ``name`` defaults to the formula, ``origin`` to
+        ``"import"``. If the project already holds the same structure, that one is returned with
+        ``existing: True`` and nothing changes.
+        """
+        if sum(x is not None for x in (crystal, atoms, structure)) > 1:
+            raise ValueError("give at most one of crystal, atoms, structure")
+        if atoms is not None:
+            crystal = self.import_cif(ase_to_cif(atoms))
+        elif structure is not None:
+            crystal = self.import_cif(pymatgen_to_cif(structure))
+        body = {"crystal": self._crystal_arg(crystal), "name": name, "parent_id": parent_id, "origin": origin,
+                "notes": notes}
+        return self._rest("POST", f"/api/projects/{int(project_id)}/structures",
+                          json={k: v for k, v in body.items() if v is not None}).json()
+
+    def structures(self, project_id: int) -> List[Dict[str, Any]]:
+        """``GET /api/projects/{id}/structures`` -> ``StructureListRow[]`` (no ``crystal``). Each row's
+        ``latest`` merges the newest summary of every result kind (``energy_per_atom_ev``,
+        ``min_frequency_thz``, ``k_vrh_gpa``...); ``latest_result_ids`` maps kind -> result id."""
+        return self._rest("GET", f"/api/projects/{int(project_id)}/structures").json()
+
+    def structure(self, structure_id: int) -> Dict[str, Any]:
+        """``GET /api/structures/{id}`` -> ``Structure`` (with ``crystal``)."""
+        return self._rest("GET", f"/api/structures/{int(structure_id)}").json()
+
+    def rename_structure(self, structure_id: int, name: Optional[str] = None, *,
+                         notes: Optional[str] = None) -> Dict[str, Any]:
+        """``PATCH /api/structures/{id}`` (``name`` and / or ``notes``) -> ``Structure``."""
+        body = {k: v for k, v in (("name", name), ("notes", notes)) if v is not None}
+        return self._rest("PATCH", f"/api/structures/{int(structure_id)}", json=body).json()
+
+    def delete_structure(self, structure_id: int) -> None:
+        """``DELETE /api/structures/{id}`` with its results (children keep existing, ``parent_id: None``)."""
+        self._rest("DELETE", f"/api/structures/{int(structure_id)}")
+
+    def load_structure(self, structure_id: int) -> Crystal:
+        """Make a saved structure the session's active one (``LOAD_STRUCTURE``) -> the new active crystal."""
+        return self.load(crystal=self.structure(structure_id)["crystal"])
+
+    def results(self, structure_id: int, kind: Optional[str] = None) -> List[Dict[str, Any]]:
+        """``GET /api/structures/{id}/results`` -> ``ResultRow[]``, newest first (``summary``, no ``data``)."""
+        params = {"kind": kind} if kind is not None else None
+        return self._rest("GET", f"/api/structures/{int(structure_id)}/results", params=params).json()
+
+    def result(self, result_id: int) -> Dict[str, Any]:
+        """``GET /api/results/{id}`` -> ``Result``; ``data`` is the payload of the matching event
+        (final RELAXATION_FRAME, PHONON_ANALYSIS_COMPLETE, the hull response...)."""
+        return self._rest("GET", f"/api/results/{int(result_id)}").json()
+
+    def export_project(self, project_id: int, path: str) -> Dict[str, Any]:
+        """``GET /api/projects/{id}/export``: write the self-contained bundle (JSON) to ``path``; returns it."""
+        bundle = self._rest("GET", f"/api/projects/{int(project_id)}/export").json()
+        with open(path, "w", encoding="utf-8") as fh:
+            json.dump(bundle, fh)
+        return bundle
+
+    def import_project(self, path: str, name: Optional[str] = None) -> Dict[str, Any]:
+        """``POST /api/projects/import`` of a bundle file -> the **new** ``Project`` (``name`` overrides
+        the bundle's)."""
+        with open(path, encoding="utf-8") as fh:
+            bundle = json.load(fh)
+        params = {"name": name} if name is not None else None
+        return self._rest("POST", "/api/projects/import", json=bundle, params=params).json()
+
+    # ================================================================ job queue (REST, protocol §7)
+    def submit_jobs(self, project_id: int, structure_ids: Union[int, Sequence[int]],
+                    steps: Sequence[Union[str, P.JobStep]], *, model_id: Optional[str] = None,
+                    dispersion: Optional[bool] = None) -> List[Dict[str, Any]]:
+        """``POST /api/jobs``: one chain per structure -> every created ``Job``, chain by chain in step order.
+
+        ``steps`` are step dicts (``{"kind", "settings", "only_if_unstable"}``, see :func:`job_step`) or bare
+        kinds (``"relax"``, ``"phonons"``, ``"elastic"``, ``"eos"``, ``"hull"``, ``"follow"``); omitted
+        settings take the UI defaults. Without ``model_id`` the session's model (:meth:`set_model`) is used,
+        else the server default. Each later step runs on the output of the last relax / follow before it.
+        """
+        ids = [int(structure_ids)] if isinstance(structure_ids, int) else [int(s) for s in structure_ids]
+        body: Dict[str, Any] = {"project_id": int(project_id), "structure_ids": ids,
+                                "steps": [{"kind": s} if isinstance(s, str) else dict(s) for s in steps]}
+        model = self._model_fields() if model_id is None else {"model_id": model_id}
+        if dispersion is not None:
+            model["dispersion"] = bool(dispersion)
+        body.update(model)
+        return self._rest("POST", "/api/jobs", json=body).json()
+
+    def jobs(self, project_id: Optional[int] = None, *, active: Optional[bool] = None) -> List[Dict[str, Any]]:
+        """``GET /api/jobs`` -> ``Job[]`` in queue order (``active=True``: queued + running, ``False``:
+        finished). A job paused for interactive work says so in its ``message``."""
+        params = {k: v for k, v in (("project_id", project_id),
+                                    ("active", None if active is None else str(bool(active)).lower()))
+                  if v is not None}
+        return self._rest("GET", "/api/jobs", params=params).json()["jobs"]
+
+    def job(self, job_id: int) -> Dict[str, Any]:
+        """``GET /api/jobs/{id}`` -> ``Job``."""
+        return self._rest("GET", f"/api/jobs/{int(job_id)}").json()
+
+    def cancel_job(self, job_id: int) -> Dict[str, Any]:
+        """``POST /api/jobs/{id}/cancel`` -> the ``Job`` (a running one says ``"cancelling"`` until its next
+        checkpoint; the rest of its chain is cancelled). INVALID_OPERATION (409) if already finished."""
+        return self._rest("POST", f"/api/jobs/{int(job_id)}/cancel").json()
+
+    def wait_jobs(self, jobs: Union[int, str, Dict[str, Any], Iterable[Union[int, str, Dict[str, Any]]]],
+                  poll: float = 1.5, on_progress: Callback = None, *,
+                  timeout: Optional[float] = None) -> List[Dict[str, Any]]:
+        """Block until every given job is finished (done / failed / cancelled / skipped); returns them.
+
+        ``jobs``: job ids, ``Job`` dicts (e.g. what :meth:`submit_jobs` returned), chain ids (32-hex
+        strings: every job of the chain), or a mix. ``on_progress`` gets each ``Job`` whose status,
+        progress or message changed since the last poll. Raises :class:`StudioTimeout` after ``timeout``
+        seconds (the jobs keep running) and ``StudioError`` NOT_FOUND for an unknown job or chain.
+        """
+        items = [jobs] if isinstance(jobs, (int, str, dict)) else list(jobs)
+        ids: List[int] = []
+        chains: List[str] = []
+        for item in items:
+            if isinstance(item, str):
+                chains.append(item)
+            else:
+                ids.append(int(item["id"]) if isinstance(item, dict) else int(item))
+        deadline = None if timeout is None else time.monotonic() + timeout
+        seen: Dict[int, Tuple[Any, Any, Any]] = {}
+        while True:
+            listed = self.jobs()
+            by_id = {j["id"]: j for j in listed}
+            current = [by_id[i] if i in by_id else self.job(i) for i in ids]   # job(): 404 for unknown ids
+            for chain in chains:
+                members = sorted((j for j in listed if j["chain_id"] == chain), key=lambda j: j["step_index"])
+                if not members:
+                    raise StudioError("NOT_FOUND", f"no jobs in chain {chain}", command="wait_jobs")
+                current += [j for j in members if j["id"] not in ids]
+            for j in current:
+                state = (j["status"], j.get("progress"), j.get("message"))
+                if seen.get(j["id"]) != state:
+                    seen[j["id"]] = state
+                    if on_progress is not None:
+                        on_progress(j)
+            if all(j["status"] in P.JOB_FINISHED for j in current):
+                return current
+            if deadline is not None and time.monotonic() >= deadline:
+                raise StudioTimeout("wait_jobs", timeout or 0.0)
+            time.sleep(poll if deadline is None else max(0.0, min(poll, deadline - time.monotonic())))
 
 
 def _norm_label(label: str) -> str:

@@ -1,11 +1,14 @@
 """Conversions between ``CrystalStatePayload`` dicts, ASE / pymatgen objects and text formats.
 
 ASE and pymatgen are optional and imported lazily. Structures are sent to the
-server as extxyz text (keeps the atom order; no dependency needed to write it).
+session as extxyz text (keeps the atom order; no dependency needed to write it),
+and to the stateless ``POST /api/import/cif`` (used to save an object to the
+project library without touching the session) as a P1 CIF.
 """
 
 from __future__ import annotations
 
+import math
 import re
 from typing import Any, Dict, List, Sequence
 
@@ -32,6 +35,44 @@ def pymatgen_to_extxyz(structure: Any) -> str:
         raise ValueError("disordered pymatgen Structure; order it first (or send its CIF to Studio.ordering)")
     return _extxyz([site.specie.symbol for site in structure], structure.lattice.matrix.tolist(),
                    [site.coords.tolist() for site in structure])
+
+
+def _cif(symbols: Sequence[str], cell: Sequence[Sequence[float]], frac: Sequence[Sequence[float]]) -> str:
+    """P1 CIF (cell lengths / angles + fractional coordinates, atom order kept)."""
+    a, b, c = ([float(x) for x in row] for row in cell)
+
+    def norm(v: List[float]) -> float:
+        return math.sqrt(sum(x * x for x in v))
+
+    def angle(u: List[float], v: List[float]) -> float:
+        return math.degrees(math.acos(max(-1.0, min(1.0, sum(x * y for x, y in zip(u, v)) / (norm(u) * norm(v))))))
+
+    lines = ["data_latticeflow", "_symmetry_space_group_name_H-M 'P 1'", "_symmetry_Int_Tables_number 1",
+             f"_cell_length_a {norm(a):.10f}", f"_cell_length_b {norm(b):.10f}", f"_cell_length_c {norm(c):.10f}",
+             f"_cell_angle_alpha {angle(b, c):.10f}", f"_cell_angle_beta {angle(a, c):.10f}",
+             f"_cell_angle_gamma {angle(a, b):.10f}",
+             "loop_", "_symmetry_equiv_pos_as_xyz", "'x, y, z'",
+             "loop_", "_atom_site_label", "_atom_site_type_symbol", "_atom_site_fract_x", "_atom_site_fract_y",
+             "_atom_site_fract_z", "_atom_site_occupancy"]
+    lines += [f"{s}{i + 1} {s} {float(f[0]):.10f} {float(f[1]):.10f} {float(f[2]):.10f} 1"
+              for i, (s, f) in enumerate(zip(symbols, frac))]
+    return "\n".join(lines) + "\n"
+
+
+def ase_to_cif(atoms: Any) -> str:
+    """Periodic ``ase.Atoms`` -> P1 CIF text."""
+    if atoms.cell.rank != 3:
+        raise ValueError("the Atoms object needs a 3D cell")
+    return _cif(atoms.get_chemical_symbols(), atoms.cell.array.tolist(),
+                atoms.get_scaled_positions(wrap=False).tolist())
+
+
+def pymatgen_to_cif(structure: Any) -> str:
+    """Ordered ``pymatgen.core.Structure`` -> P1 CIF text."""
+    if not structure.is_ordered:
+        raise ValueError("disordered pymatgen Structure; order it first (or send its CIF to Studio.ordering)")
+    return _cif([site.specie.symbol for site in structure], structure.lattice.matrix.tolist(),
+                [site.frac_coords.tolist() for site in structure])
 
 
 def crystal_to_ase(crystal: Crystal) -> Any:

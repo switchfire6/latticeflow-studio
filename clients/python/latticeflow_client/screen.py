@@ -4,6 +4,7 @@ CLI::
 
     latticeflow-screen compositions.csv --out results.csv [--url http://localhost:8000]
                        [--top-k 3] [--hull] [--elastic] [--fmax 0.02] [--steps 60] [--seed 0]
+                       [--queue [--project Screening]]
 
 ``compositions.csv`` has a ``composition`` column (atoms per cell, e.g. ``SrTiO3``,
 ``Sr2Ti2O6``, ``Ba(TiO3)``) and optional per-row ``target_spacegroup``,
@@ -12,6 +13,13 @@ header is read as one composition per line (``#`` comments allowed). The output
 is CSV, or JSON when ``--out`` ends in ``.json``. One row per candidate; a failed
 stage records ``error`` and the row is still written (later stages are skipped
 for that candidate, the batch continues; a dropped connection is reopened).
+
+With ``--queue`` only the generation runs in the session: the candidates are
+saved to the project ``--project`` (created if missing) and one job chain per
+candidate (relax -> phonons [-> hull] [-> elastic]) goes to the server's job
+queue. The CLI waits for the chains and builds the table from the relaxed
+structures' ``latest`` summaries. The results stay in the project library (open
+them in the Library panel); an interrupted run keeps running on the server.
 
 Columns: composition, candidate_rank, formula, n_atoms, spacegroup_generated,
 spacegroup, spacegroup_number, energy_per_atom_ev, pressure_gpa, max_force_ev_a,
@@ -29,6 +37,7 @@ from typing import Any, Callable, Dict, Iterable, List, Optional, Sequence
 
 from latticeflow_client.client import Studio
 from latticeflow_client.errors import StudioConnectionError, StudioError
+from latticeflow_client.protocol import JOB_FINISHED, job_step
 from latticeflow_client.structures import parse_formula
 
 COLUMNS = [
@@ -165,6 +174,119 @@ def screen(compositions: Iterable[Any], *, url: str = "http://localhost:8000", t
     return rows
 
 
+# ---------------------------------------------------------------- --queue mode
+def find_or_create_project(studio: Studio, name: str) -> Dict[str, Any]:
+    """The first project called ``name`` (lowest id), created if there is none."""
+    for project in studio.projects():
+        if project["name"] == name:
+            return project
+    return studio.create_project(name)
+
+
+def queue_steps(*, hull: bool = False, elastic: bool = False, relax_options: Optional[Dict[str, Any]] = None,
+                phonon_options: Optional[Dict[str, Any]] = None) -> List[Dict[str, Any]]:
+    """The job chain equivalent to :func:`screen_composition`'s stages."""
+    steps = [job_step("relax", **(relax_options or {})),
+             job_step("phonons", **dict({"cell_mode": "primitive"}, **(phonon_options or {})))]
+    if hull:
+        steps.append(job_step("hull", relax=False))   # the chain's relax step already relaxed it
+    if elastic:
+        steps.append(job_step("elastic"))
+    return steps
+
+
+_SUMMARY_COLUMNS = ("energy_per_atom_ev", "pressure_gpa", "max_force_ev_a", "relax_converged", "min_frequency_thz",
+                    "dynamically_stable", "imaginary_mode_count", "e_hull_ev", "k_vrh_gpa", "g_vrh_gpa",
+                    "born_stable")
+
+
+def _row_from_library(row: Dict[str, Any], chain: List[Dict[str, Any]],
+                      rows_by_id: Dict[int, Dict[str, Any]]) -> Dict[str, Any]:
+    """Fill ``row`` from the relaxed child's ``latest`` summaries; ``error`` from the first failed step."""
+    relax = next((j for j in chain if j["kind"] == "relax"), None)
+    sid = relax.get("output_structure_id") if relax else None
+    struct = rows_by_id.get(sid) if sid is not None else None
+    if struct is not None:
+        latest = struct.get("latest") or {}
+        row.update(formula=struct["formula"], n_atoms=struct["n_atoms"], spacegroup=struct["spacegroup_symbol"],
+                   spacegroup_number=struct["spacegroup_number"])
+        row.update({col: latest[col] for col in _SUMMARY_COLUMNS if col in latest})
+    bad = next((j for j in chain if j["status"] in ("failed", "cancelled")), None)
+    if bad is not None:
+        row["error"] = f"{bad['kind']}: {bad.get('error') or bad['status']}"
+    return row
+
+
+def screen_queued(compositions: Iterable[Any], *, url: str = "http://localhost:8000", project: str = "Screening",
+                  top_k: int = 3, hull: bool = False, elastic: bool = False,
+                  relax_options: Optional[Dict[str, Any]] = None, phonon_options: Optional[Dict[str, Any]] = None,
+                  generate_options: Optional[Dict[str, Any]] = None,
+                  on_job: Optional[Callable[[Dict[str, Any]], Any]] = None, studio: Optional[Studio] = None,
+                  timeout: Optional[float] = None, poll: float = 1.5) -> List[Dict[str, Any]]:
+    """Like :func:`screen`, but the per-candidate stages run as job chains in the server's queue.
+
+    Generates the candidates of every composition, saves them to ``project`` (found by name, created if
+    missing), submits one chain per distinct candidate structure, waits (``on_job`` gets every job update)
+    and returns one row per candidate, read from the library's ``latest`` summaries.
+    """
+    own = studio is None
+    studio = studio or Studio(url, timeout=timeout)
+    try:
+        pid = find_or_create_project(studio, project)["id"]
+        model = _model_name(studio)
+        rows: List[Dict[str, Any]] = []
+        sids: List[Optional[int]] = []    # saved structure per row
+        for item in compositions:
+            spec = {"composition": item} if isinstance(item, str) else dict(item)
+            composition = spec["composition"]
+            opts = dict(generate_options or {})
+            opts.update({k: spec[k] for k in ("target_spacegroup", "target_crystal_system", "seed") if k in spec})
+            try:
+                gen = studio.generate(parse_formula(composition), top_k=int(spec.get("top_k", top_k)), **opts)
+            except (StudioError, ValueError) as exc:
+                if isinstance(exc, StudioConnectionError):
+                    raise
+                rows.append({"composition": composition, "model": model, "error": f"generate: {exc}"})
+                sids.append(None)
+                continue
+            for cand in gen["candidates"] or [{"rank": 1, "crystal": gen["crystal"]}]:
+                rank = cand.get("rank", 1)
+                row = {"composition": composition, "candidate_rank": rank, "model": model,
+                       "spacegroup_generated": cand["crystal"].get("spacegroup_symbol")}
+                sid = None
+                try:
+                    sid = studio.save_structure(pid, cand["crystal"], name=f"{composition} #{rank}",
+                                                origin="generate")["id"]
+                except StudioConnectionError:
+                    raise
+                except StudioError as exc:
+                    row["error"] = f"save: {exc.code}: {exc.message}"
+                rows.append(row)
+                sids.append(sid)
+
+        unique = list(dict.fromkeys(s for s in sids if s is not None))   # dedup'd candidates share a chain
+        steps = queue_steps(hull=hull, elastic=elastic, relax_options=relax_options, phonon_options=phonon_options)
+        jobs: List[Dict[str, Any]] = []
+        for i in range(0, len(unique), 500):   # POST /api/jobs takes at most 500 structures
+            jobs += studio.submit_jobs(pid, unique[i:i + 500], steps)
+        if not jobs:
+            return rows
+        jobs = studio.wait_jobs(jobs, poll=poll, on_progress=on_job)
+        chain_of = {}   # starting structure -> chain jobs in step order (step 0 keeps its input id)
+        for job in jobs:
+            if job["step_index"] == 0:
+                chain_of[job["structure_id"]] = sorted((j for j in jobs if j["chain_id"] == job["chain_id"]),
+                                                       key=lambda j: j["step_index"])
+        rows_by_id = {r["id"]: r for r in studio.structures(pid)}
+        for row, sid in zip(rows, sids):
+            if sid is not None:
+                _row_from_library(row, chain_of.get(sid, []), rows_by_id)
+        return rows
+    finally:
+        if own:
+            studio.close()
+
+
 def write_rows(rows: Sequence[Dict[str, Any]], path: str) -> None:
     if path.lower().endswith(".json"):
         with open(path, "w", encoding="utf-8") as fh:
@@ -190,6 +312,10 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     ap.add_argument("--steps", type=int, default=None, help="generator flow steps")
     ap.add_argument("--seed", type=int, default=None, help="generator seed (per-row 'seed' wins)")
     ap.add_argument("--timeout", type=float, default=None, help="per-command timeout, s")
+    ap.add_argument("--queue", action="store_true",
+                    help="run relax/phonons/hull/elastic as job chains in the server's queue; the results also "
+                         "stay in the project library")
+    ap.add_argument("--project", default="Screening", help="--queue: library project (created if missing)")
     args = ap.parse_args(argv)
 
     specs = read_compositions(args.compositions)
@@ -208,9 +334,21 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
             if row.get("energy_per_atom_ev") is not None else "")
         print(f"{row['composition']:>14} #{row.get('candidate_rank', '-')}: {status}", flush=True)
 
+    relax_options = {"fmax": args.fmax, "max_steps": args.max_steps}
+    if args.queue:
+        def job_update(job: Dict[str, Any]) -> None:
+            if job["status"] in JOB_FINISHED:
+                text = job.get("error") or job.get("message") or ""
+                print(f"  job {job['id']:>5} {job['kind']:>8}: {job['status']} {text}".rstrip(), flush=True)
+
+        for row in screen_queued(specs, url=args.url, project=args.project, top_k=args.top_k, hull=args.hull,
+                                 elastic=args.elastic, relax_options=relax_options, generate_options=gen_opts,
+                                 on_job=job_update, timeout=args.timeout):
+            report(row)
+        print(f"{len(rows)} rows -> {args.out} (project {args.project!r} in the library)")
+        return 0
     screen(specs, url=args.url, top_k=args.top_k, hull=args.hull, elastic=args.elastic,
-           relax_options={"fmax": args.fmax, "max_steps": args.max_steps}, generate_options=gen_opts,
-           on_row=report, timeout=args.timeout)
+           relax_options=relax_options, generate_options=gen_opts, on_row=report, timeout=args.timeout)
     print(f"{len(rows)} rows -> {args.out}")
     return 0
 

@@ -31,9 +31,11 @@ def _free_port() -> int:
 
 
 @pytest.fixture(scope="session")
-def server_url():
+def server_url(tmp_path_factory):
     if not (BACKEND / "app" / "main.py").exists():
         pytest.skip("backend/ not found next to clients/python")
+    # a throwaway project library + job queue (library.db), never the user's ~/.latticeflow
+    os.environ["LATTICEFLOW_DATA_DIR"] = str(tmp_path_factory.mktemp("latticeflow-data"))
     sys.path.insert(0, str(BACKEND))
     import uvicorn
 

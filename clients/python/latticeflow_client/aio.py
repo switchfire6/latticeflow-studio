@@ -7,6 +7,11 @@ an event loop stays responsive while a phonon run or an MD stream is in flight;
 >>> studio = await AsyncStudio.open("http://localhost:8000")
 >>> await studio.relax()
 >>> ph = await studio.phonons(cell_mode="primitive")
+>>> jobs = await studio.submit_jobs(pid, [sid], ["relax", "phonons"])
+>>> await studio.wait_jobs(jobs)      # polls in a worker thread; the loop stays free
+
+The project library and job queue helpers (``projects``, ``save_structure``,
+``submit_jobs``, ``wait_jobs``...) are wrapped the same way.
 """
 
 from __future__ import annotations

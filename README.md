@@ -88,6 +88,11 @@ with Studio("http://localhost:8000") as studio:          # its own session (sepa
     studio.follow_instability(label="R")                  # softest mode at R
     print(studio.local_analysis()["octahedral_tilts"]["glazer"])   # a0a0c-
     atoms = studio.to_ase()
+
+    pid = studio.create_project("Perovskites")["id"]      # project library + background job queue
+    jobs = studio.submit_jobs(pid, [studio.save_structure(pid)["id"]], ["relax", "phonons", "elastic"])
+    studio.wait_jobs(jobs)
+    print([row["latest"] for row in studio.structures(pid)])   # newest summaries per structure
 ```
 
 - Each method sends one command and blocks until its terminal message arrives.
@@ -95,8 +100,9 @@ with Studio("http://localhost:8000") as studio:          # its own session (sepa
 - A server `ERROR` raises `StudioError(code, message)`; a cancelled stream raises `StreamStopped`.
 - `AsyncStudio` offers the same API as coroutines.
 - REST helpers: `hull()`, `diffraction()`, `compare()`, `mp_search()`, `mp_match()`, `export()` and more.
+- Library and queue: `projects()`, `save_structure()`, `structures()`, `results()`, `export_project()` / `import_project()`, `submit_jobs()`, `jobs()`, `cancel_job()`, `wait_jobs()`, and `load_structure()` to open a saved structure in the session.
 
-Batch screening from the command line: `latticeflow-screen compositions.csv --out results.csv --elastic [--hull]`.
+Batch screening from the command line: `latticeflow-screen compositions.csv --out results.csv --elastic [--hull]`. With `--queue --project NAME` the candidates are saved to a library project and screened by the job queue, so the results stay in the library.
 
 Examples, including a Jupyter notebook, are in [`clients/python/examples`](clients/python/examples). Every command, event and REST endpoint is listed in [`docs/protocol.md`](docs/protocol.md).
 

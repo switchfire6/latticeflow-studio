@@ -17,12 +17,15 @@ trailing ``HISTORY_STATE``").
 Adding a command = one entry in :data:`COMMANDS` (and, optionally, a convenience
 method on :class:`latticeflow_client.Studio`); :meth:`Studio.send_command` works
 for any entry.
+
+The REST project library and job queue (``docs/protocol.md`` §6-§7) have their
+constants and the :class:`JobStep` type at the end of this module.
 """
 
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Any, Callable, Dict, Optional, Tuple
+from typing import Any, Callable, Dict, Optional, Tuple, TypedDict
 
 Predicate = Callable[[Dict[str, Any]], bool]
 
@@ -130,3 +133,29 @@ AUTO_RELAX_SPEC = _spec(SINGLE_POINT_UPDATE, HISTORY_STATE, Step(RELAXATION_FRAM
 
 #: what the server sends on connect (default preset loaded)
 CONNECT_SPEC = _spec(*_COMMIT)
+
+
+# ---- project library + job queue (REST, docs/protocol.md §6-§7) -----------------
+#: ``ResultCreate.kind`` / ``ResultRow.kind``
+RESULT_KINDS = ("relax", "phonons", "elastic", "eos", "hull", "md", "diffraction")
+#: ``JobStep.kind``
+JOB_STEP_KINDS = ("relax", "phonons", "elastic", "eos", "hull", "follow")
+JOB_STATUSES = ("queued", "running", "done", "failed", "cancelled", "skipped")
+#: a job in one of these statuses will not change any more
+JOB_FINISHED = frozenset({"done", "failed", "cancelled", "skipped"})
+
+
+class JobStep(TypedDict, total=False):
+    """One step of a ``POST /api/jobs`` chain; omitted ``settings`` take the interactive UI defaults."""
+
+    kind: str                     # one of JOB_STEP_KINDS
+    settings: Dict[str, Any]      # e.g. {"fmax": 0.01} for relax, {"supercell_dim": [2, 2, 2]} for phonons
+    only_if_unstable: bool        # follow only: skip (instead of fail) when the phonons are stable
+
+
+def job_step(kind: str, *, only_if_unstable: bool = False, **settings: Any) -> JobStep:
+    """``job_step("relax", fmax=0.01)`` -> ``{"kind": "relax", "settings": {"fmax": 0.01}}``."""
+    step: JobStep = {"kind": kind, "settings": settings}
+    if only_if_unstable:
+        step["only_if_unstable"] = True
+    return step

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pytest
 
-from latticeflow_client import StreamStopped, Studio, StudioError, parse_formula
+from latticeflow_client import StreamStopped, Studio, StudioError, job_step, parse_formula
 
 
 @pytest.fixture()
@@ -126,3 +126,41 @@ def test_screen_cli_survives_bad_rows(server_url, tmp_path):
     assert [r["composition"] for r in rows] == ["Na4Cl4", "Xx2O"]
     assert rows[0]["spacegroup_generated"] == "Fm-3m" and rows[0]["min_frequency_thz"] and not rows[0]["error"]
     assert rows[1]["error"].startswith("generate:")
+
+
+def test_library_and_job_queue(studio, tmp_path):
+    import os
+    from pathlib import Path
+
+    assert (Path(os.environ["LATTICEFLOW_DATA_DIR"]) / "library.db").exists()   # temp library, not ~/.latticeflow
+    pid = studio.create_project("client test")["id"]
+    studio.load(preset="si")
+    saved = studio.save_structure(pid, name="Si preset")
+    assert saved["name"] == "Si preset" and saved["existing"] is False
+    assert studio.save_structure(pid, saved["crystal"])["existing"] is True        # dedup by content hash
+
+    jobs = studio.submit_jobs(pid, [saved["id"]], [job_step("relax", fmax=0.05, max_steps=60),
+                                                   job_step("phonons", supercell_dim=[2, 2, 2])])
+    assert [j["kind"] for j in jobs] == ["relax", "phonons"] and len({j["chain_id"] for j in jobs}) == 1
+    seen = []
+    done = studio.wait_jobs(jobs[0]["chain_id"], poll=0.2, on_progress=seen.append, timeout=300)
+    assert [j["status"] for j in done] == ["done", "done"] and seen
+
+    child_id = done[0]["output_structure_id"]
+    child = studio.structure(child_id)
+    assert child["parent_id"] == saved["id"] and child["origin"] == "relax" and done[1]["structure_id"] == child_id
+    row = next(r for r in studio.structures(pid) if r["id"] == child_id)
+    assert row["latest"]["relax_converged"] is not None and "min_frequency_thz" in row["latest"]
+    phonons = studio.result(row["latest_result_ids"]["phonons"])
+    assert phonons["data"]["min_frequency_thz"] == row["latest"]["min_frequency_thz"]
+    assert [r["kind"] for r in studio.results(child_id)] == ["phonons", "relax"]
+
+    bundle = tmp_path / "project.json"
+    studio.export_project(pid, str(bundle))
+    copy = studio.import_project(str(bundle), name="client test copy")
+    assert copy["n_structures"] == 2
+    assert studio.load_structure(child_id)["formula"] == "Si"
+    studio.delete_project(copy["id"])
+    with pytest.raises(StudioError) as err:
+        studio.cancel_job(jobs[0]["id"])
+    assert err.value.code == "INVALID_OPERATION" and err.value.status == 409
