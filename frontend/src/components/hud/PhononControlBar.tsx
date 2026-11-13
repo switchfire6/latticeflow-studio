@@ -3,6 +3,9 @@
  * (imaginary modes marked), animation controls (play/pause, amplitude gain,
  * temperature, slow-motion speed) and the "Freeze & Relax Imaginary Mode
  * (Follow Instability)" action with its amplitude.
+ * Phase B (§5.2): a "Γ irreps" tab lists the Γ-point irreducible
+ * representations with IR / Raman / silent / acoustic badges; a row selects
+ * that Γ mode.
  */
 import { BarChart3, Loader2, Pause, Play, Snowflake } from "lucide-react";
 import { useState } from "react";
@@ -12,8 +15,61 @@ import { commands } from "../../services/wsClient";
 import { useSettings } from "../../store/settings";
 import { useCrystalStore } from "../../store/useCrystalStore";
 import { formatFrequency } from "../../utils/units";
-import { classifyFrequency, qLabelAt } from "../../utils/bandChart";
-import { Button, Slider, cx } from "./ui";
+import type { GammaModeIrrep } from "../../types/protocol";
+import { classifyFrequency, formatIrrep, gammaQIndex, irrepBadges, qLabelAt, type IrrepBadge } from "../../utils/bandChart";
+import type { FrequencyUnit } from "../../utils/units";
+import { Button, Segmented, Slider, cx } from "./ui";
+
+const BADGE_CLS: Record<IrrepBadge, string> = {
+  acoustic: "border-white/10 text-slate-400",
+  IR: "border-rose-400/40 text-rose-200",
+  Raman: "border-emerald-400/40 text-emerald-200",
+  silent: "border-white/10 text-slate-500",
+  unknown: "border-white/10 text-slate-600",
+};
+
+export function GammaIrrepList({
+  modes,
+  unit,
+  selectedBand,
+  onSelect,
+}: {
+  modes: readonly GammaModeIrrep[];
+  unit: FrequencyUnit;
+  selectedBand: number | null;
+  onSelect(band: number): void;
+}) {
+  return (
+    <div role="listbox" aria-label="Γ irreps" data-gamma-irreps>
+      {modes.map((m, i) => {
+        const sel = selectedBand !== null && m.band_indices.includes(selectedBand);
+        return (
+          <button
+            key={i}
+            type="button"
+            role="option"
+            aria-selected={sel}
+            onClick={() => m.band_indices.length && onSelect(m.band_indices[0]!)}
+            title={`bands ${m.band_indices.join(", ")} (degeneracy ${m.band_indices.length})`}
+            className={cx("flex w-full items-center gap-1.5 px-2 py-[3px] font-mono text-[10.5px]", sel ? "bg-cyan-400/15 text-cyan-100" : "text-slate-300 hover:bg-white/5")}
+          >
+            <span className="w-11 shrink-0 text-left">{formatIrrep(m.label)}</span>
+            <span className={cx("w-[72px] shrink-0 text-right tabular-nums", classifyFrequency(m.frequency_thz) === "imaginary" && "text-rose-300")}>
+              {formatFrequency(m.frequency_thz, unit, 2)}
+            </span>
+            <span className="flex flex-1 justify-end gap-0.5">
+              {irrepBadges(m).map((b) => (
+                <span key={b} className={cx("rounded border px-1 text-[9px] leading-[14px]", BADGE_CLS[b])}>
+                  {b === "unknown" ? "?" : b}
+                </span>
+              ))}
+            </span>
+          </button>
+        );
+      })}
+    </div>
+  );
+}
 
 export function PhononControlBar() {
   const phonon = useCrystalStore((s) => s.phonon);
@@ -27,7 +83,11 @@ export function PhononControlBar() {
   const hasDos = useCrystalStore((s) => s.dos !== null);
   const dosPending = useCrystalStore((s) => s.dosPending);
   const [amplitude, setAmplitude] = useState("0.1");
+  const [tab, setTab] = useState<"q" | "gamma">("q");
   if (!phonon) return null;
+  const gammaQ = gammaQIndex(phonon.kpath_labels);
+  const hasIrreps = !!phonon.gamma_modes?.length && gammaQ !== null;
+  const showIrreps = hasIrreps && tab === "gamma";
   const st = useCrystalStore.getState();
 
   const q = selection?.qIndex ?? phonon.kpath_labels[0]?.index ?? 0;
@@ -55,8 +115,26 @@ export function PhononControlBar() {
           {playing ? <Pause size={11} /> : <Play size={11} />} {playing ? "Pause" : "Play"}
         </button>
       </div>
+      {hasIrreps && (
+        <Segmented<"q" | "gamma">
+          value={tab}
+          options={[
+            { value: "q", label: `modes at ${qLabel}` },
+            { value: "gamma", label: "Γ irreps (IR / Raman)" },
+          ]}
+          onChange={setTab}
+        />
+      )}
       <div className="min-h-[92px] flex-1 shrink-0 overflow-y-auto rounded-md border border-white/[0.06] bg-black/20" role="listbox" aria-label="modes at q">
-        {freqs.map((f, b) => {
+        {showIrreps && (
+          <GammaIrrepList
+            modes={phonon.gamma_modes!}
+            unit={unit}
+            selectedBand={selection?.qIndex === gammaQ ? selection.band : null}
+            onSelect={(band) => selectModeAt(gammaQ!, band)}
+          />
+        )}
+        {!showIrreps && freqs.map((f, b) => {
           const cls = classifyFrequency(f);
           const sel = selection?.qIndex === q && selection.band === b;
           return (

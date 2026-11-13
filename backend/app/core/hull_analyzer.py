@@ -376,13 +376,10 @@ def _doc_get(doc: Any, name: str) -> Any:
 
 
 def _mp_user_agent() -> str:
-    """Generic User-Agent: the client library and version only (no platform, no app name)."""
-    try:
-        from importlib.metadata import version
+    """Generic User-Agent: the client library and version only (shared with ``mp_client``)."""
+    from app.core.mp_client import mp_user_agent
 
-        return f"mp-api/{version('mp-api')}"
-    except Exception:  # noqa: BLE001
-        return "mp-api"
+    return mp_user_agent()
 
 
 def fetch_reference_structures(chemsys_list: List[str], api_key: Optional[str]) -> List[MPReference]:

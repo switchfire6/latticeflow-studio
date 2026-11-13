@@ -17,16 +17,23 @@ import { create } from "zustand";
 import type {
   BulkModulusResult,
   ClientCommand,
+  DiffractionResponse,
+  ElasticTensorResult,
   CrystalStatePayload,
   Eigenmode,
   ErrorPayload,
   HealthResponse,
   HistoryState,
   HullEvaluateResponse,
+  ModelChanged,
+  ModelListResponse,
   PhononAnalysisComplete,
+  PhononConvergenceResult,
   PhononDosData,
   PresetInfo,
+  Progress,
 } from "../types/protocol";
+import type { ExperimentalPattern } from "../utils/diffraction";
 import { loadJSON, saveJSON } from "../utils/persist";
 import { atomsPerFormulaUnit, type LatticeReference } from "../utils/structureInfo";
 import { DEFAULT_PHONON_PARAMS, type PhononAnimParams } from "../utils/phonon";
@@ -40,13 +47,23 @@ export type ToolMode = "VIEW" | "DRAG_ATOM" | "TRANSMUTE" | "PHONON_SHAKE";
 
 export type StreamCommand = Extract<
   ClientCommand,
-  "START_FLOW_GENERATION" | "START_RELAXATION" | "RUN_PHONON_SHAKE_TEST" | "FOLLOW_INSTABILITY" | "PERTURB_OR_TRANSMUTE_ATOM"
+  | "START_FLOW_GENERATION"
+  | "START_RELAXATION"
+  | "RUN_PHONON_SHAKE_TEST"
+  | "FOLLOW_INSTABILITY"
+  | "PERTURB_OR_TRANSMUTE_ATOM"
+  // Phase B
+  | "CHECK_PHONON_CONVERGENCE"
+  | "COMPUTE_ELASTIC_TENSOR"
+  | "SET_MODEL"
 >;
-export type StreamKind = "flow" | "relaxation" | "phonon";
+export type StreamKind = "flow" | "relaxation" | "phonon" | "elastic" | "model";
 
 export function streamKind(command: StreamCommand): StreamKind {
   if (command === "START_FLOW_GENERATION") return "flow";
-  if (command === "RUN_PHONON_SHAKE_TEST") return "phonon";
+  if (command === "RUN_PHONON_SHAKE_TEST" || command === "CHECK_PHONON_CONVERGENCE") return "phonon";
+  if (command === "COMPUTE_ELASTIC_TENSOR") return "elastic";
+  if (command === "SET_MODEL") return "model";
   return "relaxation"; // START_RELAXATION, FOLLOW_INSTABILITY, PERTURB(auto_relax)
 }
 
@@ -56,6 +73,10 @@ export interface StreamProgress {
   t: number | null;
   maxForce: number | null;
   energyPerAtom: number | null;
+  /** Phase B: latest PROGRESS event of this stream (done / total + message). */
+  done?: number | null;
+  total?: number | null;
+  message?: string | null;
 }
 
 export interface ActiveStream {
@@ -152,8 +173,10 @@ export type HullState =
   | { status: "unavailable"; message: string; stateVersion: number }
   | { status: "error"; code: string; message: string; stateVersion: number };
 
-export type DockPane = "dispersion" | "dos" | "rdf" | "relaxation" | "eos";
-export const DOCK_PANES: readonly DockPane[] = ["dispersion", "dos", "rdf", "relaxation", "eos"];
+export type DockPane = "dispersion" | "dos" | "rdf" | "relaxation" | "eos" | "elastic" | "xrd";
+export const DOCK_PANES: readonly DockPane[] = ["dispersion", "dos", "rdf", "relaxation", "eos", "elastic", "xrd"];
+/** Panes that appear only once requested (button / dock toggle) or when they hold a result. */
+export const ON_DEMAND_PANES: readonly DockPane[] = ["elastic", "xrd"];
 export interface DockState {
   open: boolean;
   height: number;
@@ -165,7 +188,7 @@ export const DEFAULT_DOCK: DockState = {
   height: 300,
   // The DOS pane is offered (toggle + "DOS & thermo" button) but not forced into the layout.
   hidden: ["dos"],
-  weights: { dispersion: 1.7, dos: 1.5, rdf: 1, relaxation: 1.2, eos: 1.4 },
+  weights: { dispersion: 1.7, dos: 1.5, rdf: 1, relaxation: 1.2, eos: 1.4, elastic: 1.5, xrd: 1.7 },
 };
 
 /** Merge a stored dock layout over the defaults (older layouts lack the Phase A panes). */
@@ -200,6 +223,43 @@ export interface EosState {
   nAtoms: number;
 }
 
+/** Phase B: what the scorecard keeps of the latest phonon analysis (survives its invalidation, then shown stale). */
+export interface PhononSummary {
+  stable: boolean;
+  minFrequencyThz: number;
+  imaginaryCount: number;
+  supercellDim: [number, number, number] | null;
+  minImageDistance: number | null;
+  cellMode: "as_displayed" | "primitive" | null;
+  stateVersion: number;
+  convergence: PhononConvergenceResult | null;
+}
+
+export function summarizePhonon(p: PhononAnalysisComplete, stateVersion: number, convergence: PhononConvergenceResult | null): PhononSummary {
+  return {
+    stable: p.is_dynamically_stable,
+    minFrequencyThz: p.min_frequency_thz,
+    imaginaryCount: p.imaginary_mode_count,
+    supercellDim: p.supercell_dim ?? null,
+    minImageDistance: p.min_image_distance ?? null,
+    cellMode: p.cell_mode ?? null,
+    stateVersion,
+    convergence,
+  };
+}
+
+/** ELASTIC_TENSOR_RESULT tied to the state version it was computed for. */
+export interface ElasticState {
+  result: ElasticTensorResult;
+  stateVersion: number;
+}
+
+/** POST /api/diffraction result for a state version. */
+export interface DiffractionState {
+  result: DiffractionResponse;
+  stateVersion: number;
+}
+
 /** A relaxation that stopped at max_steps without converging ("Continue relaxation"). */
 export interface UnconvergedRelaxation {
   steps: number;
@@ -232,6 +292,10 @@ export interface SessionBookkeeping {
   relaxFmax: number;
   /** Supercell of the latest RUN_PHONON_SHAKE_TEST (progress text). */
   phononSupercell: [number, number, number];
+  /** min_supercell_length of the latest shake-test (null = explicit supercell). */
+  phononMinLength: number | null;
+  /** PHONON_CONVERGENCE_RESULT seen; the next PHONON_ANALYSIS_COMPLETE belongs to it. */
+  convergenceArrived: boolean;
   nextToastId: number;
 }
 
@@ -278,6 +342,25 @@ export interface CrystalStoreState {
   /** Lattice at the start of the latest relaxation / follow (Δa, ΔV in the Structure card). */
   latticeRef: LatticeReference | null;
   relaxUnconverged: UnconvergedRelaxation | null;
+
+  // Phase B
+  /** The session's model (MODEL_CHANGED); null = process default (see health). */
+  model: ModelChanged | null;
+  models: ModelListResponse | null;
+  modelsError: string | null;
+  /** Latest PROGRESS per command (cleared when the command ends). */
+  progress: Partial<Record<ClientCommand, Progress>>;
+  phononSummary: PhononSummary | null;
+  /** Convergence check of the current phonon analysis (cleared with it). */
+  convergence: PhononConvergenceResult | null;
+  elastic: ElasticState | null;
+  diffraction: DiffractionState | null;
+  diffractionPending: boolean;
+  diffractionError: string | null;
+  xrdExperimental: ExperimentalPattern | null;
+  phononExportPending: boolean;
+  /** On-demand panes the user opened this session. */
+  openedPanes: DockPane[];
 
   // misc
   relaxHistory: RelaxPoint[];
@@ -341,6 +424,27 @@ export interface CrystalStoreState {
   /** Patch fields of the current crystal without counting it as a structure change (e.g. bulk_modulus_gpa). */
   patchCrystal(p: Partial<CrystalStatePayload>): void;
 
+  // Phase B
+  setModel(m: ModelChanged | null): void;
+  setModels(m: ModelListResponse | null, error?: string | null): void;
+  /** Record a PROGRESS event (also on the matching stream entry). */
+  setProgress(p: Progress): void;
+  clearProgress(command: ClientCommand): void;
+  setPhononSummary(p: PhononSummary | null): void;
+  setConvergence(c: PhononConvergenceResult | null): void;
+  setElastic(e: ElasticState | null): void;
+  setDiffraction(d: DiffractionState | null): void;
+  setDiffractionPending(p: boolean, error?: string | null): void;
+  setXrdExperimental(p: ExperimentalPattern | null): void;
+  setPhononExportPending(p: boolean): void;
+  /** Make an on-demand pane available and show it. */
+  openPane(p: DockPane, visible?: readonly DockPane[]): void;
+  /**
+   * Count a non-structural change of the evaluated state (model switch) as a
+   * new state version, so every result stamped with the old one reads stale.
+   */
+  bumpStateVersion(): void;
+
   setToolMode(mode: ToolMode): void;
   selectAtom(index: number | null): void;
   setHoveredAtom(index: number | null): void;
@@ -377,6 +481,8 @@ export function createCrystalStore(opts: CrystalStoreOptions = {}) {
       relaxVersion: 0,
       relaxFmax: 0.02,
       phononSupercell: [2, 2, 2],
+      phononMinLength: null,
+      convergenceArrived: false,
       nextToastId: 1,
     };
     const dockKey = opts.dockStorageKey ?? null;
@@ -439,6 +545,19 @@ export function createCrystalStore(opts: CrystalStoreOptions = {}) {
       dosPending: false,
       latticeRef: null,
       relaxUnconverged: null,
+      model: null,
+      models: null,
+      modelsError: null,
+      progress: {},
+      phononSummary: null,
+      convergence: null,
+      elastic: null,
+      diffraction: null,
+      diffractionPending: false,
+      diffractionError: null,
+      xrdExperimental: null,
+      phononExportPending: false,
+      openedPanes: [],
       relaxHistory: [],
       toasts: [],
       lastError: null,
@@ -455,6 +574,7 @@ export function createCrystalStore(opts: CrystalStoreOptions = {}) {
       resetSession: () => {
         session.streams = [];
         session.awaitingActorFlags = false;
+        session.convergenceArrived = false;
         session.stopBarrier = 0;
         frame.drag = null;
         frame.phonon.active = false;
@@ -470,6 +590,11 @@ export function createCrystalStore(opts: CrystalStoreOptions = {}) {
           dos: null,
           dosPending: false,
           relaxUnconverged: null,
+          // A fresh server session runs the process-default model.
+          model: null,
+          progress: {},
+          convergence: null,
+          phononExportPending: false,
         }));
         publishNow();
       },
@@ -567,7 +692,7 @@ export function createCrystalStore(opts: CrystalStoreOptions = {}) {
       clearPhonon: () => {
         const s = get();
         frame.phonon.active = false;
-        if (s.phonon === null && s.selectedEigenmode === null && s.modeSelection === null && s.dos === null && !s.dosPending) return;
+        if (s.phonon === null && s.selectedEigenmode === null && s.modeSelection === null && s.dos === null && !s.dosPending && s.convergence === null) return;
         set({
           phonon: null,
           selectedEigenmode: null,
@@ -575,6 +700,7 @@ export function createCrystalStore(opts: CrystalStoreOptions = {}) {
           toolMode: s.toolMode === "PHONON_SHAKE" ? "DRAG_ATOM" : s.toolMode,
           dos: null,
           dosPending: false,
+          convergence: null,
         });
       },
 
@@ -615,6 +741,38 @@ export function createCrystalStore(opts: CrystalStoreOptions = {}) {
         if (!frame.crystal) return;
         frame.crystal = { ...frame.crystal, ...p };
         frame.version++;
+        publishNow();
+      },
+
+      setModel: (model) => set({ model }),
+      setModels: (models, error = null) => set({ models, modelsError: error }),
+      setProgress: (p) => {
+        const entry = session.streams.find((x) => x.command === p.command);
+        if (entry) Object.assign(entry.progress, { done: p.done, total: p.total, message: p.message });
+        set((s) => ({ progress: { ...s.progress, [p.command]: p }, streams: snapshotStreams() }));
+      },
+      clearProgress: (command) => {
+        if (!(command in get().progress)) return;
+        set((s) => {
+          const next = { ...s.progress };
+          delete next[command];
+          return { progress: next };
+        });
+      },
+      setPhononSummary: (phononSummary) => set({ phononSummary }),
+      setConvergence: (convergence) => set({ convergence }),
+      setElastic: (elastic) => set({ elastic }),
+      setDiffraction: (diffraction) => set({ diffraction }),
+      setDiffractionPending: (diffractionPending, error) =>
+        set((s) => ({ diffractionPending, diffractionError: error === undefined ? s.diffractionError : error })),
+      setXrdExperimental: (xrdExperimental) => set({ xrdExperimental }),
+      setPhononExportPending: (phononExportPending) => set({ phononExportPending }),
+      openPane: (p, visible) => {
+        if (ON_DEMAND_PANES.includes(p) && !get().openedPanes.includes(p)) set((s) => ({ openedPanes: [...s.openedPanes, p] }));
+        get().revealPane(p, visible);
+      },
+      bumpStateVersion: () => {
+        frame.stateVersion++;
         publishNow();
       },
 

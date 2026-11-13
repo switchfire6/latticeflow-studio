@@ -122,6 +122,7 @@ export function UnitsToggle() {
 export function StreamProgress() {
   const stream = useCrystalStore(selectActiveStream);
   const supercell = useCrystalStore((s) => s.session.phononSupercell);
+  const minLength = useCrystalStore((s) => s.session.phononMinLength);
   if (!stream) return null;
   const p = stream.progress;
   let title: string;
@@ -138,10 +139,22 @@ export function StreamProgress() {
       p.step !== null
         ? `step ${p.step} · max |F| = ${(p.maxForce ?? 0).toFixed(3)} eV/Å`
         : "starting…";
+  } else if (stream.command === "CHECK_PHONON_CONVERGENCE") {
+    title = "Phonon convergence check";
+    detail = p.message || "next larger supercell";
+  } else if (stream.kind === "elastic") {
+    title = "Elastic tensor";
+    detail = p.message || "straining the cell";
+  } else if (stream.kind === "model") {
+    title = "Switching model";
+    detail = p.message || "loading the checkpoint";
   } else {
     title = "Phonon shake-test";
-    detail = `${supercell.join("×")} supercell · finite displacements`;
+    detail = p.message || `${minLength != null ? `auto (≥ ${minLength} Å)` : supercell.join("×")} supercell · finite displacements`;
   }
+  // Phase B: PROGRESS events give a determinate bar for long streams.
+  if (frac === null && p.done != null && p.total) frac = Math.min(1, p.done / p.total);
+  if (p.done != null && p.total && stream.kind !== "flow") detail += ` · ${p.done}/${p.total}`;
   return (
     <Panel className="pointer-events-auto flex min-w-[320px] items-center gap-3 px-3 py-2">
       <Loader2 size={15} className="shrink-0 animate-spin text-cyan-300" />

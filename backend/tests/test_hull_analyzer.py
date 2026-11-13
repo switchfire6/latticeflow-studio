@@ -459,7 +459,7 @@ def test_mace_nacl_hull_signs(mace_engine, tmp_path, capsys):
     t0 = time.perf_counter()
     res2 = ha.evaluate_hull(cand, engine=mace_engine, fetcher=fetcher, cache=cache)
     warm = time.perf_counter() - t0
-    assert 0.0 <= res2.e_hull_ev < 0.02
+    assert -1e-9 <= res2.e_hull_ev < 0.02            # round-off can give -4e-16 for an on-hull phase
     assert res2.decomposition == pytest.approx({"NaCl": 1.0})
     relaxed = ha.evaluate_hull(relaxed_atoms(refset, "mp-nacl"), engine=mace_engine, fetcher=fetcher, cache=cache)
     assert abs(relaxed.e_hull_ev) < 1e-6

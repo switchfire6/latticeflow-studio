@@ -2,7 +2,8 @@
  * E_hull evaluation (POST /api/hull/evaluate) with a busy state and graceful
  * handling of HULL_UNAVAILABLE (503: no MP_API_KEY on the backend; 502: MP
  * unreachable / missing references). The result is tied to the structure
- * state version it was computed for, so a later structure change marks it stale.
+ * state version it was computed for, so a later structure change (or a model
+ * switch, which bumps the version) marks it stale.
  */
 import { useCrystalStore, type CrystalStore, type HullState } from "../store/useCrystalStore";
 import { ApiError, api, type ApiClient } from "./apiClient";
@@ -33,7 +34,9 @@ export async function evaluateHull(store: CrystalStore = useCrystalStore, client
   store.getState().setHull({ status: "busy", startedAt: Date.now(), stateVersion });
   let next: HullState;
   try {
-    const result = await client.hullEvaluate(crystal);
+    // Phase B: score with the session's model (the hull cache is keyed by backend).
+    const m = st.model;
+    const result = await client.hullEvaluate(crystal, undefined, true, m ? { model_id: m.model_id, dispersion: m.dispersion } : null);
     next = { status: "ok", result, stateVersion };
   } catch (err) {
     next = hullFailureState(err, stateVersion);

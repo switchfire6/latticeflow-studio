@@ -1,7 +1,8 @@
 /**
- * Left panel (§6.3, §3.5): structure loading (presets, files, paste), the
- * Structure card, relaxation / phonon actions, the generator form for
- * START_FLOW_GENERATION, and symmetry & export. The generator speaks
+ * Left panel (§6.3, §3.5): structure loading (presets, files, paste,
+ * Materials Project), the Structure card, the generator form for
+ * START_FLOW_GENERATION, symmetry & export, and a sticky action bar at the
+ * bottom (relax / shake-test with their settings). The generator speaks
  * stoichiometry: a formula ("SrTiO3", "Ca3(PO4)2") plus formula units per
  * cell fills `composition`; the element-only mode lets the server choose the
  * stoichiometry. Sampler internals (η, steps, seed) live under "Advanced".
@@ -14,6 +15,7 @@ import type { CrystalSystem, StartFlowGenerationPayload } from "../../types/prot
 import { cpkHex, elementBySymbol, normalizeSymbol } from "../../utils/cpkColors";
 import { compositionText, parseFormula, scaleComposition } from "../../utils/formula";
 import { ImportButtons, SymmetryExportCard } from "./ImportExport";
+import { MaterialsProjectButton } from "./MaterialsProjectDialog";
 import { PeriodicTablePicker } from "./PeriodicTablePicker";
 import { StructureActions } from "./StructureActions";
 import { StructurePanel } from "./StructurePanel";
@@ -163,14 +165,17 @@ function ElementTags({ elements, onChange }: { elements: string[]; onChange(e: s
 
 export function GeneratorSidebar() {
   return (
-    <aside className="flex w-[320px] shrink-0 flex-col gap-3 overflow-y-auto border-r border-white/[0.06] bg-slate-950/60 p-3 backdrop-blur-md">
-      <LoadCard />
-      <StructurePanel />
-      <CollapsibleCard id="actions" title="Relax & phonons">
-        <StructureActions />
-      </CollapsibleCard>
-      <GeneratorCard />
-      <SymmetryExportCard />
+    <aside className="flex w-[320px] shrink-0 flex-col border-r border-white/[0.06] bg-slate-950/60 backdrop-blur-md">
+      <div className="flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto p-3">
+        <LoadCard />
+        <StructurePanel />
+        <GeneratorCard />
+        <SymmetryExportCard />
+      </div>
+      {/* Primary actions stay reachable without scrolling (Phase B): sticky action bar. */}
+      <div className="max-h-[60%] shrink-0 overflow-y-auto border-t border-white/[0.08] bg-slate-950/80 p-3 shadow-[0_-8px_24px_rgba(0,0,0,0.35)]" data-action-bar>
+        <StructureActions layout="bar" />
+      </div>
     </aside>
   );
 }
@@ -196,8 +201,9 @@ function LoadCard() {
         </Button>
       </div>
       {selectedPreset && <p className="mt-2 text-[11px] leading-snug text-slate-400">{selectedPreset.description}</p>}
-      <div className="mt-2">
+      <div className="mt-2 space-y-2">
         <ImportButtons />
+        <MaterialsProjectButton />
       </div>
     </CollapsibleCard>
   );

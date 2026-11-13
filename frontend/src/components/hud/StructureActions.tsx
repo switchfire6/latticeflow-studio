@@ -11,7 +11,7 @@
 import { Play, RotateCcw, Settings2, Square, Waves, Wind } from "lucide-react";
 import { useState } from "react";
 import { commands } from "../../services/wsClient";
-import { OPTIMIZERS, badgeCriteria, useSettings, type Optimizer } from "../../store/settings";
+import { OPTIMIZERS, badgeCriteria, useSettings, type Optimizer, type PhononCellMode } from "../../store/settings";
 import { useCrystalStore } from "../../store/useCrystalStore";
 import { latticeLengths, phononWarning, relaxationVerdict, suggestSupercell, SUPERCELL_MAX_ATOMS, SUPERCELL_MIN_LENGTH } from "../../utils/structureInfo";
 import { Button, NumberField, Segmented, cx } from "./ui";
@@ -90,22 +90,47 @@ export function PhononSettingsPanel() {
   const matrix = useCrystalStore((s) => s.crystal?.lattice.matrix ?? null);
   const nAtoms = useCrystalStore((s) => s.crystal?.atoms.length ?? 0);
   const lengths = matrix ? latticeLengths(matrix) : null;
-  const auto = lengths ? suggestSupercell(lengths, nAtoms) : ([2, 2, 2] as [number, number, number]);
+  const minLength = p.minLength ?? SUPERCELL_MIN_LENGTH;
+  const auto = lengths ? suggestSupercell(lengths, nAtoms, minLength) : ([2, 2, 2] as [number, number, number]);
   const dims = p.supercell ?? auto;
   const superAtoms = nAtoms * dims[0] * dims[1] * dims[2];
+  // In primitive mode the server sizes the supercell of the primitive cell: the estimate here is for the displayed one.
+  const estimate = p.supercell !== null || p.cellMode === "as_displayed";
   return (
     <div className="space-y-1.5 rounded-lg border border-white/[0.06] bg-black/20 p-2" data-phonon-settings>
+      <div className="flex items-center justify-between text-[11px] text-slate-400" title="Textbook: phonons of the spglib primitive cell on the standard (seekpath) path, 3·N_prim branches; the animation still uses the displayed atoms. As displayed: the cell on screen (folded branches for conventional cells).">
+        <span>dispersion</span>
+        <Segmented<PhononCellMode>
+          value={p.cellMode ?? "primitive"}
+          options={[
+            { value: "primitive", label: "textbook (primitive)" },
+            { value: "as_displayed", label: "as displayed" },
+          ]}
+          onChange={(cellMode) => set({ cellMode })}
+        />
+      </div>
       <div className="flex items-center justify-between text-[11px] text-slate-400">
         <span>supercell</span>
         <Segmented
           value={p.supercell ? "manual" : "auto"}
           options={[
-            { value: "auto", label: "auto", title: `Smallest n_i with n_i·|a_i| ≥ ${SUPERCELL_MIN_LENGTH} Å, ≤ ${SUPERCELL_MAX_ATOMS} atoms` },
+            { value: "auto", label: "auto", title: `Smallest n_i with n_i·|a_i| ≥ min length, ≤ ${SUPERCELL_MAX_ATOMS} atoms (chosen by the server)` },
             { value: "manual", label: "manual" },
           ]}
           onChange={(v) => set({ supercell: v === "auto" ? null : [...auto] })}
         />
       </div>
+      {!p.supercell && (
+        <NumberField
+          label="min supercell length"
+          unit="Å"
+          value={minLength}
+          min={4}
+          max={30}
+          onCommit={(v) => set({ minLength: v })}
+          title="Every supercell vector at least this long (sent as min_supercell_length)"
+        />
+      )}
       <div className="flex items-center justify-end gap-1">
         {[0, 1, 2].map((i) => (
           <input
@@ -124,7 +149,8 @@ export function PhononSettingsPanel() {
             }}
           />
         ))}
-        <span className="ml-1 font-mono text-[10px] text-slate-500">
+        <span className="ml-1 font-mono text-[10px] text-slate-500" title={estimate ? undefined : "Estimate for the displayed cell; the server sizes the primitive-cell supercell"}>
+          {estimate ? "" : "≈ "}
           {superAtoms} at
           {lengths && ` · ≥${Math.min(...lengths.map((L, i) => L * dims[i]!)).toFixed(1)} Å`}
         </span>
@@ -139,7 +165,7 @@ export function PhononSettingsPanel() {
 }
 
 /** FIRE relax + phonon shake-test buttons with settings (sidebar and the selected-atom toolbar). */
-export function StructureActions({ compact }: { compact?: boolean }) {
+export function StructureActions({ compact, layout = "stack" }: { compact?: boolean; layout?: "stack" | "bar" }) {
   const connected = useCrystalStore((s) => s.connection === "open");
   const relaxing = useCrystalStore((s) => s.streams.some((x) => x.kind === "relaxation"));
   const phononRunning = useCrystalStore((s) => s.streams.some((x) => x.kind === "phonon"));
@@ -181,7 +207,7 @@ export function StructureActions({ compact }: { compact?: boolean }) {
       </div>
       {phononOpen && <PhononSettingsPanel />}
       {warning && !compact && (
-        <p className="text-[10.5px] leading-snug text-amber-300/80" data-phonon-warning>
+        <p className={cx("text-[10.5px] leading-snug text-amber-300/80", layout === "bar" && "truncate")} title={warning} data-phonon-warning>
           {warning[0]!.toUpperCase() + warning.slice(1)}.
         </p>
       )}

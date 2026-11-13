@@ -2,9 +2,17 @@
 
 One :class:`StudioSession` per connection. It owns the active ``Atoms``, the last
 ``CrystalStatePayload`` sent for it, a structure version counter, the cached
-phonon analysis (tied to the version it was computed for) and at most one
-in-flight streaming job. The uMLIP engine is the process-wide singleton; its
-RLock serialises GPU use across sessions.
+phonon analysis (tied to the version it was computed for), its uMLIP engine
+and at most one in-flight streaming job.
+
+Per-session engine (Phase B, IMPROVEMENT_SUGGESTIONS.md §6.1)
+--------------------------------------------------------------
+A session starts on the process default (``UMLIPEngine.get_instance()``) and
+switches with ``SET_MODEL`` (``umlip_engine.get_engine``: a shared, LRU-bounded
+registry, so two sessions on the same model share one engine; each engine's
+RLock serialises its GPU use across sessions). Every engine use of the session
+- evaluate, relax, flow, phonons, convergence, bulk modulus, elastic tensor -
+uses the session engine; a job captures the engine it was started with.
 
 Concurrency model (all session state is touched only on the event-loop thread)
 -----------------------------------------------------------------------------
@@ -44,7 +52,7 @@ Concurrency model (all session state is touched only on the event-loop thread)
   the same atom (drag frames) are coalesced: only the latest is applied and
   answered.
 * Instant commands that only *read* the structure (``REQUEST_EIGENMODE``,
-  ``REQUEST_PHONON_DOS``, ``COMPUTE_BULK_MODULUS``) cancel nothing; they work
+  ``REQUEST_PHONON_DOS``, ``COMPUTE_BULK_MODULUS``, ``EXPORT_PHONON_DATA``) cancel nothing; they work
   on a snapshot. ``COMPUTE_BULK_MODULUS`` also stores ``k_gpa`` in the active
   payload's ``bulk_modulus_gpa`` (no extra ``SINGLE_POINT_UPDATE``), unless the
   structure changed while it ran. ``REFINE_STRUCTURE``, ``UNDO`` and ``REDO``
@@ -74,6 +82,49 @@ before that stream), restore the neighbouring entry (version += 1, which
 invalidates the phonon cache) and send ``SINGLE_POINT_UPDATE`` then
 ``HISTORY_STATE``; with nothing to undo / redo they answer
 ``ERROR INVALID_OPERATION``.
+
+History entries are *structures*: the force field is not part of the history.
+Each entry remembers the ``backend_name`` that produced its payload; ``UNDO`` /
+``REDO`` to an entry evaluated with another model (i.e. from before a
+``SET_MODEL``) re-evaluate the restored structure with the session's *current*
+engine (the entry keeps that payload). Undoing a model switch therefore does
+not switch the model back; it only steps back to the previous structure.
+
+Phase B commands (terminal messages; every stream still ends with exactly one
+terminal group, ``STREAM_STOPPED`` or ``ERROR``)
+-----------------------------------------------------------------------------
+* ``RUN_PHONON_SHAKE_TEST`` gains ``cell_mode`` / ``min_supercell_length``
+  (passed to ``run_phonon_analysis``). The ``PHONON_MAX_ATOMS`` limit applies to
+  the displayed cell; band indices are validated against ``n_branches``
+  (3 N of the phonon cell); eigenvectors stay displayed-atom indexed, so the
+  unstable-actor flags work in both modes. A ``ValueError`` of the phonon
+  engine (e.g. supercell budget) is ``ERROR INVALID_OPERATION``.
+* ``CHECK_PHONON_CONVERGENCE`` (streaming, needs a valid phonon analysis else
+  ``NO_PHONON_ANALYSIS``): reruns the cached analysis' structure with the same
+  ``cell_mode`` / displacement in ``supercell_dim`` or
+  ``next_supercell_dim(current)`` (none fits / over budget:
+  ``STRUCTURE_TOO_LARGE``). ``PROGRESS`` events: one at the start (total 0),
+  then one per force chunk (``done`` = supercells evaluated so far, total 0 =
+  unknown). Terminal: ``PHONON_CONVERGENCE_RESULT``, ``PHONON_ANALYSIS_COMPLETE``
+  of the larger supercell (it replaces the phonon cache), flagging
+  ``SINGLE_POINT_UPDATE``. No history push; a cancel keeps the old cache.
+* ``COMPUTE_ELASTIC_TENSOR`` (streaming, reads the structure only, no history
+  push): ``PROGRESS`` events from ``elastic.compute_elastic_tensor``'s callback,
+  terminal ``ELASTIC_TENSOR_RESULT``. Non-periodic structure (or a ``ValueError``
+  of the fit): ``ERROR INVALID_OPERATION``.
+* ``EXPORT_PHONON_DATA`` (instant, cancels nothing, needs a valid phonon
+  analysis): ``PHONON_EXPORT {filename: "<formula>_phonopy_params.yaml", phonopy_yaml}``.
+* ``SET_MODEL`` (streaming, state-changing): cancels a live stream first (usual
+  ``STREAM_STOPPED`` + history rules), loads the model in the worker
+  (``PROGRESS``: "Loading <id>" with total 0, download bytes if a checkpoint is
+  fetched, "Loaded ..." 1/1), then terminal ``MODEL_CHANGED``, the re-evaluated
+  ``SINGLE_POINT_UPDATE`` of the active structure, ``HISTORY_STATE`` (pushed
+  entry, label "Switch model to <id>" or "Switch model to <id> + D3"). The
+  phonon cache is invalidated. Failure: ``ERROR MODEL_UNAVAILABLE`` (unknown
+  id, not cached with downloads disabled, D3 without torch-dftd, load error;
+  ``COMPUTE_FAILED`` if only the evaluation fails) and the session keeps its
+  previous engine. A cancelled ``SET_MODEL`` is not joined: its load may finish
+  in the background (into the shared registry) but is never applied.
 """
 
 from __future__ import annotations
@@ -98,23 +149,29 @@ from app.core.flow_generator import FlowCancelled, RiemannianFlowGenerator
 from app.core.phonon_engine import PhononAnalysis, PhononCancelled
 from app.core.relaxer import RelaxationDivergedError
 from app.core.structure_io import MAX_ATOMS, StructureIOError, atoms_from_cif
-from app.core.umlip_engine import UMLIPEngine
+from app.core.umlip_engine import ModelUnavailableError, UMLIPEngine, get_engine
 from app.presets import DEFAULT_PRESET_ID, load_preset
 from app.schemas.crystal import CrystalStatePayload
 from app.schemas.messages import (
     F_TOL_THZ,
+    CheckPhononConvergencePayload,
     ClientCommand,
     ComputeBulkModulusPayload,
+    ComputeElasticTensorPayload,
     CrystalStateFinal,
     DeleteAtomPayload,
     EigenmodeData,
     Envelope,
     ErrorCode,
     ErrorPayload,
+    ExportPhononDataPayload,
     FollowInstabilityPayload,
     HistoryState,
     LoadStructurePayload,
+    ModelChanged,
     PerturbOrTransmuteAtomPayload,
+    PhononExport,
+    Progress,
     RedoPayload,
     RefineStructurePayload,
     RelaxationFrame,
@@ -122,6 +179,7 @@ from app.schemas.messages import (
     RequestPhononDosPayload,
     RunPhononShakeTestPayload,
     ServerEvent,
+    SetModelPayload,
     SinglePointUpdate,
     StartFlowGenerationPayload,
     StartRelaxationPayload,
@@ -173,9 +231,16 @@ _PAYLOAD_MODELS: Dict[ClientCommand, type] = {
     _C.UNDO: UndoPayload,
     _C.REDO: RedoPayload,
     _C.REQUEST_PHONON_DOS: RequestPhononDosPayload,
+    _C.CHECK_PHONON_CONVERGENCE: CheckPhononConvergencePayload,
+    _C.COMPUTE_ELASTIC_TENSOR: ComputeElasticTensorPayload,
+    _C.EXPORT_PHONON_DATA: ExportPhononDataPayload,
+    _C.SET_MODEL: SetModelPayload,
 }
 _STREAMING = frozenset(
-    {_C.START_FLOW_GENERATION, _C.START_RELAXATION, _C.RUN_PHONON_SHAKE_TEST, _C.FOLLOW_INSTABILITY}
+    {
+        _C.START_FLOW_GENERATION, _C.START_RELAXATION, _C.RUN_PHONON_SHAKE_TEST, _C.FOLLOW_INSTABILITY,
+        _C.CHECK_PHONON_CONVERGENCE, _C.COMPUTE_ELASTIC_TENSOR, _C.SET_MODEL,
+    }
 )
 _INIT = "__INIT__"  # internal first FIFO item: load the default preset
 
@@ -280,6 +345,34 @@ def unstable_actor_flags(analysis: PhononAnalysis) -> np.ndarray:
     return flags
 
 
+def _n_branches(analysis: PhononAnalysis) -> int:
+    """Phonon branches (3 N of the phonon cell: displayed cell, or primitive cell in primitive mode)."""
+    n = getattr(analysis, "n_branches", None)
+    return int(n) if n is not None else 3 * int(analysis.n_atoms)
+
+
+class _ForceProgressEngine:
+    """Engine proxy that reports every ``forces_batch`` chunk of a phonon run as PROGRESS.
+
+    Everything else is delegated to the wrapped engine (same lock, same model).
+    ``total`` is unknown up front (0); ``done`` counts the supercells evaluated.
+    """
+
+    def __init__(self, engine: UMLIPEngine, report: Callable[[int, str], None]) -> None:
+        self._engine = engine
+        self._report = report
+        self._done = 0
+
+    def __getattr__(self, name: str) -> Any:
+        return getattr(self._engine, name)
+
+    def forces_batch(self, atoms_list, **kwargs):
+        out = self._engine.forces_batch(atoms_list, **kwargs)
+        self._done += len(out)
+        self._report(self._done, f"{self._done} supercell force evaluations")
+        return out
+
+
 def _flag_payload(payload: CrystalStatePayload, flags: Sequence[bool]) -> CrystalStatePayload:
     out = payload.model_copy(deep=True)
     for site in out.atoms:
@@ -314,14 +407,19 @@ class _HistoryEntry:
     payload: CrystalStatePayload
     label: str
     drag_atom: Optional[int] = None        # set for a coordinate-only drag commit (coalescing key)
+    backend: Optional[str] = None          # backend_name of the engine that produced ``payload``
 
 
 class _Job:
     """One in-flight streaming job (worker thread + cancel flag)."""
 
-    def __init__(self, command: str, loop: asyncio.AbstractEventLoop, label: str = "") -> None:
+    def __init__(self, command: str, loop: asyncio.AbstractEventLoop, label: str = "",
+                 join_on_cancel: bool = True) -> None:
         self.command = command
         self.label = label                  # history label prefix, e.g. "Relaxation"
+        # False: after a cancel the worker touches no session state and no engine the
+        # session uses (SET_MODEL: a model load / download), so nobody waits for it to exit.
+        self.join_on_cancel = join_on_cancel
         self.frames_applied = 0             # loop thread only: outputs that replaced the active structure
         self.loop = loop
         self.cancel = threading.Event()
@@ -405,7 +503,7 @@ class StudioSession:
         sender.cancel()
         try:
             await asyncio.gather(processor, sender, return_exceptions=True)
-            if job is not None and not job.done.done():
+            if job is not None and not job.done.done() and job.join_on_cancel:
                 try:
                     await asyncio.wait_for(asyncio.shield(job.done), JOB_JOIN_TIMEOUT_S)
                 except asyncio.TimeoutError:
@@ -574,6 +672,10 @@ class StudioSession:
             _C.UNDO.value: self._cmd_undo,
             _C.REDO.value: self._cmd_redo,
             _C.REQUEST_PHONON_DOS.value: self._cmd_phonon_dos,
+            _C.CHECK_PHONON_CONVERGENCE.value: self._cmd_phonon_convergence,
+            _C.COMPUTE_ELASTIC_TENSOR.value: self._cmd_elastic,
+            _C.EXPORT_PHONON_DATA.value: self._cmd_export_phonon,
+            _C.SET_MODEL.value: self._cmd_set_model,
         }[command.type]
         await handler(command.payload)
 
@@ -614,7 +716,7 @@ class StudioSession:
             return
         if not job.terminated:
             self._cancel_live(job)
-        if not job.done.done():
+        if not job.done.done() and job.join_on_cancel:
             try:
                 await asyncio.wait_for(asyncio.shield(job.done), JOB_JOIN_TIMEOUT_S)
             except asyncio.TimeoutError:
@@ -625,9 +727,10 @@ class StudioSession:
         if self._job is job:
             self._job = None
 
-    def _launch(self, command: str, label: str, target: Callable[..., None], *args) -> _Job:
+    def _launch(self, command: str, label: str, target: Callable[..., None], *args,
+                join_on_cancel: bool = True) -> _Job:
         assert self.loop is not None
-        job = _Job(command, self.loop, label)
+        job = _Job(command, self.loop, label, join_on_cancel)
         self._job = job
         self._drag_open = None  # a stream ends the current drag gesture
 
@@ -729,7 +832,7 @@ class StudioSession:
     def _check_mode_index(analysis: PhononAnalysis, q_index: int, band_index: int) -> None:
         if not 0 <= q_index < analysis.n_q:
             raise CommandError(ErrorCode.INDEX_OUT_OF_RANGE, f"q_index {q_index} out of range [0, {analysis.n_q})")
-        nb = 3 * analysis.n_atoms
+        nb = _n_branches(analysis)
         if not 0 <= band_index < nb:
             raise CommandError(ErrorCode.INDEX_OUT_OF_RANGE, f"band_index {band_index} out of range [0, {nb})")
 
@@ -770,7 +873,8 @@ class StudioSession:
         """
         if self.atoms is None or self.payload is None:
             return
-        entry = _HistoryEntry(_snapshot(self.atoms), self.payload, label, drag_atom)
+        backend = self.engine.backend_name if self.engine is not None else None
+        entry = _HistoryEntry(_snapshot(self.atoms), self.payload, label, drag_atom, backend)
         h = self._history
         if (
             drag_atom is not None
@@ -797,6 +901,13 @@ class StudioSession:
             what = "undo" if delta < 0 else "redo"
             raise CommandError(ErrorCode.INVALID_OPERATION, f"nothing to {what}")
         entry = self._history[target]
+        engine = await self._get_engine()
+        if entry.backend != engine.backend_name:
+            # The entry was evaluated with another force field (before a SET_MODEL): history
+            # entries are structures, so re-evaluate with the session's current model. The
+            # entry keeps the new payload (until the model changes again).
+            entry.payload = await self._evaluate(entry.atoms)
+            entry.backend = engine.backend_name
         self._history_pos = target
         self.atoms = _snapshot(entry.atoms)
         self.payload = entry.payload
@@ -1050,6 +1161,8 @@ class StudioSession:
                 ErrorCode.STRUCTURE_TOO_LARGE,
                 f"phonon shake-test supports at most {PHONON_MAX_ATOMS} atoms per cell (structure has {len(atoms)})",
             )
+        if any(n < 1 for n in p.supercell_dim):
+            raise CommandError(ErrorCode.INVALID_PAYLOAD, f"supercell_dim entries must be >= 1, got {p.supercell_dim}")
         await self._end_job()
         work = _snapshot(self.atoms)
         base_payload = self.payload
@@ -1057,25 +1170,164 @@ class StudioSession:
         engine = self.engine
 
         def worker(job: _Job) -> None:
-            analysis = phonon_engine.run_phonon_analysis(
-                work, engine, supercell_dim=p.supercell_dim, displacement_distance=p.displacement_distance,
-                should_cancel=job.cancel.is_set,
-            )
+            try:
+                analysis = phonon_engine.run_phonon_analysis(
+                    work, engine, supercell_dim=p.supercell_dim, displacement_distance=p.displacement_distance,
+                    cell_mode=p.cell_mode, min_supercell_length=p.min_supercell_length,
+                    should_cancel=job.cancel.is_set,
+                )
+            except ValueError as exc:  # e.g. no primitive cell / supercell over the atom budget
+                job.check()
+                raise CommandError(ErrorCode.INVALID_OPERATION, str(exc)) from None
             job.check()
-            flagged = _flag_payload(base_payload, unstable_actor_flags(analysis))
-            messages = [
-                _message(ServerEvent.PHONON_ANALYSIS_COMPLETE, analysis.result),
-                _message(ServerEvent.SINGLE_POINT_UPDATE, SinglePointUpdate(crystal=flagged)),
-            ]
-
-            def on_apply() -> None:
-                if self.version == version:
-                    self._phonon = (analysis, version)
-
-            job.check()
-            self._emit_terminal(job, messages, None, flagged, on_apply)
+            self._emit_phonon_terminal(job, analysis, base_payload, version)
 
         self._launch(_C.RUN_PHONON_SHAKE_TEST.value, "Phonon shake-test", worker)
+
+    def _emit_phonon_terminal(self, job: _Job, analysis: PhononAnalysis, base_payload: CrystalStatePayload,
+                              version: int, lead: Sequence[Dict[str, Any]] = ()) -> None:
+        """Worker: terminal ``[*lead, PHONON_ANALYSIS_COMPLETE, flagging SINGLE_POINT_UPDATE]``.
+
+        The analysis becomes the session's phonon cache if the structure is unchanged.
+        """
+        flagged = _flag_payload(base_payload, unstable_actor_flags(analysis))
+        messages = [
+            *lead,
+            _message(ServerEvent.PHONON_ANALYSIS_COMPLETE, analysis.result),
+            _message(ServerEvent.SINGLE_POINT_UPDATE, SinglePointUpdate(crystal=flagged)),
+        ]
+
+        def on_apply() -> None:
+            if self.version == version:
+                self._phonon = (analysis, version)
+
+        job.check()
+        self._emit_terminal(job, messages, None, flagged, on_apply)
+
+    def _post_progress(self, job: _Job, done: int, total: int, message: str = "") -> None:
+        """Any thread: queue a non-terminal PROGRESS event of ``job`` (dropped once it is terminated)."""
+        msg = _message(ServerEvent.PROGRESS, Progress(command=job.command, done=int(done), total=int(total),
+                                                       message=str(message)))
+        job.post(self._apply_job_output, job, [msg], None, None, False)
+
+    async def _cmd_phonon_convergence(self, p: CheckPhononConvergencePayload) -> None:
+        analysis = self._valid_phonon()
+        n_cell = _n_branches(analysis) // 3          # atoms of the phonon cell (primitive in primitive mode)
+        current = [int(n) for n in (getattr(analysis, "supercell_dim", None) or analysis.result.supercell_dim)]
+        limit = int(getattr(phonon_engine, "PHONON_SUPERCELL_MAX_ATOMS", 600))
+        if p.supercell_dim is not None:
+            dim = [int(n) for n in p.supercell_dim]
+            if any(n < 1 for n in dim):
+                raise CommandError(ErrorCode.INVALID_PAYLOAD, f"supercell_dim entries must be >= 1, got {dim}")
+            if n_cell * int(np.prod(dim)) > limit:
+                raise CommandError(
+                    ErrorCode.STRUCTURE_TOO_LARGE,
+                    f"supercell {dim} of the {n_cell}-atom phonon cell has {n_cell * int(np.prod(dim))} atoms "
+                    f"(limit {limit})",
+                )
+        else:
+            try:
+                dim = [int(n) for n in phonon_engine.next_supercell_dim(current, n_cell, max_atoms=limit)]
+            except ValueError as exc:
+                raise CommandError(ErrorCode.STRUCTURE_TOO_LARGE, str(exc)) from None
+        await self._end_job()
+        work = _snapshot(self._require_atoms())
+        base_payload = self.payload
+        version = self.version
+        engine = self.engine
+        cell_mode = getattr(analysis, "cell_mode", "as_displayed")
+        displacement = float(getattr(analysis, "displacement_distance", 0.01))
+
+        def worker(job: _Job) -> None:
+            self._post_progress(job, 0, 0, f"Phonons in a {'x'.join(map(str, dim))} supercell")
+            counting = _ForceProgressEngine(engine, lambda done, msg: self._post_progress(job, done, 0, msg))
+            try:
+                larger = phonon_engine.run_phonon_analysis(
+                    work, counting, supercell_dim=dim, displacement_distance=displacement,
+                    cell_mode=cell_mode, min_supercell_length=None, should_cancel=job.cancel.is_set,
+                )
+            except ValueError as exc:
+                job.check()
+                raise CommandError(ErrorCode.STRUCTURE_TOO_LARGE, str(exc)) from None
+            job.check()
+            comparison = phonon_engine.compare_phonon_analyses(analysis, larger)
+            job.check()
+            lead = [_message(ServerEvent.PHONON_CONVERGENCE_RESULT, comparison)]
+            self._emit_phonon_terminal(job, larger, base_payload, version, lead)
+
+        self._launch(_C.CHECK_PHONON_CONVERGENCE.value, "Phonon convergence", worker)
+
+    async def _cmd_elastic(self, p: ComputeElasticTensorPayload) -> None:
+        atoms = self._require_atoms()
+        if not (bool(np.all(atoms.pbc)) and atoms.cell.rank == 3):
+            raise CommandError(ErrorCode.INVALID_OPERATION, "the elastic tensor needs a fully periodic 3D cell")
+        await self._end_job()
+        work = _snapshot(atoms)
+        engine = self.engine
+
+        def worker(job: _Job) -> None:
+            from app.core import elastic
+
+            def progress(done: int, total: int, message: str = "") -> None:
+                self._post_progress(job, done, total, message)
+
+            try:
+                result = elastic.compute_elastic_tensor(
+                    work, engine, max_strain=p.max_strain, n_strains=p.n_strains, relax_ions=p.relax_ions,
+                    fmax=p.fmax, should_cancel=job.cancel.is_set, progress=progress,
+                )
+            except elastic.ElasticCancelled:
+                raise _JobCancelled() from None
+            except ValueError as exc:
+                job.check()
+                raise CommandError(ErrorCode.INVALID_OPERATION, str(exc)) from None
+            job.check()
+            self._emit_terminal(job, [_message(ServerEvent.ELASTIC_TENSOR_RESULT, result)], None, None)
+
+        self._launch(_C.COMPUTE_ELASTIC_TENSOR.value, "Elastic tensor", worker)
+
+    async def _cmd_export_phonon(self, _payload: ExportPhononDataPayload) -> None:
+        analysis = self._valid_phonon()
+        formula = (self.payload.formula if self.payload is not None else "") or "structure"
+        text = await asyncio.to_thread(analysis.export_phonopy_yaml)
+        self._send(_message(ServerEvent.PHONON_EXPORT,
+                            PhononExport(filename=f"{formula}_phonopy_params.yaml", phonopy_yaml=text)))
+
+    async def _cmd_set_model(self, p: SetModelPayload) -> None:
+        self._require_atoms()
+        await self._get_engine()
+        await self._end_job()
+        work = _snapshot(self._require_atoms())
+
+        def worker(job: _Job) -> None:
+            def progress(done: int, total: int, message: str) -> None:
+                self._post_progress(job, done, total, message)
+
+            try:
+                engine = get_engine(p.model_id, p.dispersion, progress=progress)
+            except ModelUnavailableError as exc:
+                job.check()
+                raise CommandError(ErrorCode.MODEL_UNAVAILABLE, str(exc)) from None
+            job.check()
+            payload = engine.evaluate(work)
+            job.check()
+            changed = ModelChanged(model_id=engine.model_id, backend_name=engine.backend_name,
+                                   dispersion=engine.dispersion, device=str(engine.device), dtype=str(engine.dtype))
+
+            def on_apply() -> None:
+                self.engine = engine
+                self._phonon = None  # computed with the previous model
+
+            messages = [
+                _message(ServerEvent.MODEL_CHANGED, changed),
+                _message(ServerEvent.SINGLE_POINT_UPDATE, SinglePointUpdate(crystal=payload)),
+            ]
+            # ``work`` is the active structure (nothing state-changing can run during the
+            # job without cancelling it); applying it bumps the version like any commit.
+            self._emit_terminal(job, messages, work, payload, on_apply,
+                                history_label=f"Switch model to {engine.label}")
+
+        self._launch(_C.SET_MODEL.value, "Switch model", worker, join_on_cancel=False)
 
     async def _cmd_follow(self, p: FollowInstabilityPayload) -> None:
         analysis = self._valid_phonon()

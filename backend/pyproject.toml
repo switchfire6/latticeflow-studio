@@ -18,6 +18,7 @@ dependencies = [
     "pyxtal",
     "torch",
     "mace-torch",
+    "torch-dftd",
     "mp-api",
 ]
 

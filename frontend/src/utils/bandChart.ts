@@ -166,3 +166,96 @@ export function qLabelAt(labels: readonly KPathLabel[], qIndex: number): string 
   const l = labels.find((x) => x.index === qIndex);
   return l ? formatKLabel(l.label) : null;
 }
+
+// --------------------------------------------------------------------------- //
+// Phase B (§5.2): connected branches, Γ irreps
+// --------------------------------------------------------------------------- //
+/** True when band_order is a [n_q][n_b] table of permutations of 0..n_b−1. */
+export function validBandOrder(order: readonly (readonly number[])[] | null | undefined, nq: number, nb: number): order is number[][] {
+  if (!order || order.length !== nq || nb === 0) return false;
+  for (const row of order) {
+    if (row.length !== nb) return false;
+    const seen = new Uint8Array(nb);
+    for (const v of row) {
+      if (!Number.isInteger(v) || v < 0 || v >= nb || seen[v]) return false;
+      seen[v] = 1;
+    }
+  }
+  return true;
+}
+
+/**
+ * Frequencies by connected branch: out[q][k] = freqs[q][order[q][k]]
+ * (band_order[q][k] = index into the ascending frequencies of branch k). Without
+ * a valid order the ascending table is returned unchanged.
+ */
+export function connectedFrequencies(freqs: readonly (readonly number[])[], order: readonly (readonly number[])[] | null | undefined): number[][] {
+  const nb = freqs[0]?.length ?? 0;
+  if (!validBandOrder(order, freqs.length, nb)) return freqs.map((r) => r.slice());
+  return freqs.map((row, q) => order[q]!.map((b) => row[b]!));
+}
+
+/** Connected branch k that holds ascending band `band` at q (identity without an order). */
+export function branchOfBand(order: readonly (readonly number[])[] | null | undefined, q: number, band: number): number {
+  const row = order?.[q];
+  if (!row) return band;
+  const k = row.indexOf(band);
+  return k < 0 ? band : k;
+}
+
+/** Index of the first Γ point on the path (null if the path has none). */
+export function gammaQIndex(labels: readonly KPathLabel[]): number | null {
+  for (const l of labels) {
+    const parts = l.label.split("|");
+    if (parts.some((p) => /^\\?(gamma|Γ|G)$/i.test(p.trim()))) return l.index;
+  }
+  return null;
+}
+
+export type IrrepBadge = "acoustic" | "IR" | "Raman" | "silent" | "unknown";
+
+/** Spectroscopic activity badges of a Γ irrep. */
+export function irrepBadges(m: { is_acoustic: boolean; ir_active: boolean | null; raman_active: boolean | null }): IrrepBadge[] {
+  if (m.is_acoustic) return ["acoustic"];
+  if (m.ir_active === null && m.raman_active === null) return ["unknown"];
+  const out: IrrepBadge[] = [];
+  if (m.ir_active) out.push("IR");
+  if (m.raman_active) out.push("Raman");
+  if (!out.length) out.push(m.ir_active === false && m.raman_active === false ? "silent" : "unknown");
+  return out;
+}
+
+/** "T1u" → "T₁ᵤ"-style display (digits subscripted; g/u kept as letters). */
+export function formatIrrep(label: string | null | undefined): string {
+  if (!label) return "—";
+  return label.replace(/(\d)/g, (_, d: string) => String.fromCharCode(0x2080 + Number(d)));
+}
+
+// --------------------------------------------------------------------------- //
+// Log axis (relaxation chart): readable decade ticks
+// --------------------------------------------------------------------------- //
+/** Smallest positive force drawn on the log axis (values below are clamped here). */
+export const LOG_AXIS_FLOOR = 1e-12;
+
+/**
+ * Decade domain [10^lo, 10^hi] covering [min, max] (clamped at `floor`) and at
+ * most `maxTicks` tick decades, thinned to every k-th decade (k = 1, 2, 3, 5,
+ * 10…) and anchored so the top decade is always labelled.
+ */
+export function logAxisTicks(min: number, max: number, maxTicks = 6, floor = LOG_AXIS_FLOOR): { lo: number; hi: number; ticks: number[] } {
+  const a = Math.max(floor, Number.isFinite(min) && min > 0 ? min : floor);
+  const b = Math.max(a * 10, Number.isFinite(max) && max > 0 ? max : a * 10);
+  const lo = Math.floor(Math.log10(a));
+  const hi = Math.ceil(Math.log10(b));
+  const span = hi - lo;
+  const steps = [1, 2, 3, 5, 10, 20, 50];
+  const k = steps.find((s) => Math.floor(span / s) + 1 <= Math.max(2, maxTicks)) ?? Math.ceil(span / Math.max(1, maxTicks - 1));
+  const ticks: number[] = [];
+  for (let e = hi; e >= lo; e -= k) ticks.unshift(e);
+  return { lo, hi, ticks };
+}
+
+/** "1e-3" style decade labels (plain for ≥ 1). */
+export function decadeLabel(e: number): string {
+  return e >= 0 ? String(10 ** e) : `1e${e}`;
+}

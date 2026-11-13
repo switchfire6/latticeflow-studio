@@ -6,7 +6,7 @@
  * Wyckoff, fractional coordinates, |F|). `StructureInfoView` is pure
  * (server-rendered in tests).
  */
-import { Gauge, Loader2 } from "lucide-react";
+import { Gauge, Loader2, Radar, Sigma } from "lucide-react";
 import { useState, type ReactNode } from "react";
 import { showPane } from "../../services/dockActions";
 import { commands } from "../../services/wsClient";
@@ -225,6 +225,31 @@ export function StructureInfoView(p: StructureInfoProps) {
   );
 }
 
+/** Phase B: elastic tensor (§5.5) and simulated diffraction (§5.6) entry points. */
+function PropertyActions({ connected }: { connected: boolean }) {
+  const elasticRunning = useCrystalStore((s) => s.streams.some((x) => x.command === "COMPUTE_ELASTIC_TENSOR"));
+  const busy = useCrystalStore((s) => s.streams.length > 0);
+  return (
+    <div className="mt-2 grid grid-cols-2 gap-1.5 border-t border-white/[0.06] pt-2">
+      <Button
+        className="px-2 py-1 text-[10.5px]"
+        disabled={!connected || (busy && !elasticRunning)}
+        title="Elastic tensor C_ij, Born stability, VRH moduli (opens the elastic pane; settings there)"
+        onClick={() => {
+          // First time: compute at once; with a result, open the pane (recompute there).
+          if (!elasticRunning && !useCrystalStore.getState().elastic) commands.computeElastic();
+          showPane("elastic");
+        }}
+      >
+        {elasticRunning ? <Loader2 size={11} className="animate-spin" /> : <Sigma size={11} />} Elastic tensor
+      </Button>
+      <Button className="px-2 py-1 text-[10.5px]" onClick={() => showPane("xrd")} title="Simulated X-ray / neutron powder pattern with an experimental overlay">
+        <Radar size={11} /> Diffraction (XRD)
+      </Button>
+    </div>
+  );
+}
+
 export function StructurePanel() {
   const crystal = useCrystalStore((s) => s.crystal);
   const latticeRef = useCrystalStore((s) => s.latticeRef);
@@ -253,6 +278,9 @@ export function StructurePanel() {
           selectedAtom={selectedAtom}
           onSelectAtom={(i) => useCrystalStore.getState().selectAtom(i)}
         />
+      ) : null}
+      {crystal ? (
+        <PropertyActions connected={connected} />
       ) : (
         <p className="text-[11px] text-slate-500">No structure loaded.</p>
       )}

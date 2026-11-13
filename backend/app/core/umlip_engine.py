@@ -1,9 +1,22 @@
 """Universal ML interatomic potential engine (PROJECT_SPEC.md §4.3, §7 Phase 1).
 
-``UMLIPEngine`` wraps exactly one force-field backend for the whole process:
+``UMLIPEngine`` wraps exactly one force-field backend:
 
 * ``mace``      MACE-MP-0 via ``mace.calculators.mace_mp`` (``backend_name`` e.g. ``"mace-mp-0-small"``)
 * ``fallback``  the analytic LJ + DSF-Coulomb calculator (``backend_name == "lj-fallback"``)
+
+The process default is the singleton ``UMLIPEngine.get_instance()``
+(``LATTICEFLOW_MACE_MODEL``). Phase B (IMPROVEMENT_SUGGESTIONS.md §6.1) adds
+other models per session / per request: :func:`list_models` (the picker
+catalog), :func:`default_model_id` and :func:`get_engine` (``None`` / the
+default -> the singleton; anything else -> a thread-safe registry keyed by
+(model_id, dispersion) holding at most ``MAX_RESIDENT_MODELS`` non-default
+MACE engines, LRU). Errors are :class:`ModelUnavailableError`. With
+``dispersion=True`` the calculator is ``mace_mp(..., dispersion=True)`` (D3(BJ),
+PBE; needs torch-dftd), ``backend_name`` gets a ``+d3`` suffix and batched
+evaluation is disabled (the batched path would bypass the D3 term).
+``backend_name`` is unique per (model, dispersion): ``mace-mp-0-<name>`` for
+the MP-0 family, ``mace-mpa-0-medium``, ``mace-omat-0-medium``, ``...+d3``.
 
 Never-hang checkpoint guard
 ---------------------------
@@ -57,14 +70,18 @@ the space group is ("P1", 1) and crystal_system / wyckoff are None.
 
 from __future__ import annotations
 
+import collections
+import gc
 import logging
 import os
 import threading
 import time
 import urllib.request
 import uuid
+import weakref
+from dataclasses import dataclass
 from pathlib import Path
-from typing import List, Optional, Sequence, Tuple
+from typing import Callable, Dict, List, Optional, Sequence, Tuple
 
 import numpy as np
 from ase import Atoms
@@ -80,6 +97,9 @@ EV_PER_A3_TO_GPA = 160.21766208
 FALLBACK_BACKEND_NAME = "lj-fallback"
 _SOCKET_TIMEOUT_S = 15.0
 _MIN_CHECKPOINT_BYTES = 1_000_000
+
+#: ``progress(done, total, message)`` sink for long model loads (bytes during a download).
+ProgressFn = Callable[[int, int, str], None]
 
 
 # --------------------------------------------------------------------------
@@ -106,8 +126,12 @@ def mace_cached_checkpoint_path(url: str) -> Path:
     return _mace_cache_dir() / name
 
 
-def _download_with_deadline(url: str, dest: Path, timeout_s: float) -> None:
-    """Download ``url`` to ``dest`` atomically; never blocks the caller > timeout_s."""
+def _download_with_deadline(url: str, dest: Path, timeout_s: float, progress: Optional[ProgressFn] = None) -> None:
+    """Download ``url`` to ``dest`` atomically; never blocks the caller > timeout_s.
+
+    ``progress(done_bytes, total_bytes, message)`` (optional) is called from the
+    download thread at most every ~0.25 s (``total_bytes`` is 0 when unknown).
+    """
     dest.parent.mkdir(parents=True, exist_ok=True)
     tmp = dest.with_name(f"{dest.name}.{uuid.uuid4().hex}.part")
     cancel = threading.Event()
@@ -120,12 +144,23 @@ def _download_with_deadline(url: str, dest: Path, timeout_s: float) -> None:
                 ctype = resp.headers.get("Content-Type", "").split(";")[0].strip().lower()
                 if ctype == "text/html":
                     raise RuntimeError(f"checkpoint URL returned HTML, not a model: {url}")
+                try:
+                    total = int(resp.headers.get("Content-Length") or 0)
+                except ValueError:
+                    total = 0
+                done = 0
+                last = 0.0
                 with open(tmp, "wb") as out:
                     while not cancel.is_set():
                         block = resp.read(1 << 18)
                         if not block:
                             break
                         out.write(block)
+                        done += len(block)
+                        now = time.monotonic()
+                        if progress is not None and now - last >= 0.25:
+                            last = now
+                            _safe_progress(progress, done, total, f"Downloading {os.path.basename(url)}")
             if cancel.is_set():
                 raise TimeoutError("download cancelled")
             size = tmp.stat().st_size
@@ -157,7 +192,26 @@ def _download_with_deadline(url: str, dest: Path, timeout_s: float) -> None:
     logger.info("Cached MACE checkpoint at %s in %.1f s", dest, time.monotonic() - t0)
 
 
-def resolve_mace_checkpoint(model: str, *, allow_download: bool, timeout_s: float) -> Tuple[Path, str]:
+def mace_backend_name(model: str) -> str:
+    """``backend_name`` of a named MACE model (the hull cache is keyed by it).
+
+    The MACE-MP-0 family keeps its historical ``mace-mp-0-<name>`` names (so
+    existing hull caches stay valid); the newer families get their own prefix:
+    ``medium-mpa-0`` -> ``mace-mpa-0-medium``, ``medium-omat-0`` -> ``mace-omat-0-medium``.
+    A D3 engine appends ``+d3``.
+    """
+    if model.startswith("https://"):
+        return "mace-mp-0-custom"
+    for family in ("mpa-0", "omat-0"):
+        suffix = f"-{family}"
+        if model.endswith(suffix):
+            return f"mace-{family}-{model[: -len(suffix)]}"
+    return f"mace-mp-0-{model}"
+
+
+def resolve_mace_checkpoint(
+    model: str, *, allow_download: bool, timeout_s: float, progress: Optional[ProgressFn] = None
+) -> Tuple[Path, str]:
     """Return (local checkpoint path, backend_name) without ever blocking unboundedly."""
     if Path(model).is_file():
         return Path(model), f"mace-{Path(model).stem}"
@@ -168,8 +222,31 @@ def resolve_mace_checkpoint(model: str, *, allow_download: bool, timeout_s: floa
     if not path.is_file():
         if not allow_download:
             raise FileNotFoundError(f"MACE checkpoint not cached at {path} and downloads are disabled")
-        _download_with_deadline(url, path, timeout_s)
-    return path, f"mace-mp-0-{model}" if not model.startswith("https://") else "mace-mp-0-custom"
+        _download_with_deadline(url, path, timeout_s, progress)
+    return path, mace_backend_name(model)
+
+
+def _safe_progress(progress: Optional[ProgressFn], done: int, total: int, message: str) -> None:
+    if progress is None:
+        return
+    try:
+        progress(int(done), int(total), message)
+    except Exception:  # noqa: BLE001 - a progress sink must never break a load
+        logger.debug("progress callback failed", exc_info=True)
+
+
+def dispersion_available() -> bool:
+    """True if torch-dftd (needed for ``mace_mp(dispersion=True)``) is importable."""
+    import importlib.util
+
+    try:
+        return importlib.util.find_spec("torch_dftd") is not None
+    except (ImportError, ValueError):
+        return False
+
+
+class ModelUnavailableError(RuntimeError):
+    """A requested force field is unknown or cannot be loaded (``ErrorCode.MODEL_UNAVAILABLE``)."""
 
 
 # --------------------------------------------------------------------------
@@ -215,6 +292,8 @@ class UMLIPEngine:
         settings: Optional[Settings] = None,
         download_timeout_s: Optional[float] = None,
         allow_download: Optional[bool] = None,
+        dispersion: bool = False,
+        progress: Optional[ProgressFn] = None,
     ) -> None:
         s = settings or get_settings()
         mode = (backend or s.umlip).lower()
@@ -224,6 +303,7 @@ class UMLIPEngine:
         self.lock = threading.RLock()
         self.load_error: Optional[BaseException] = None
         self.model = model or s.mace_model
+        self.dispersion = False
         self._calc: Calculator
 
         if mode in ("auto", "mace"):
@@ -233,6 +313,8 @@ class UMLIPEngine:
                     dtype=dtype or s.dtype,
                     allow_download=s.mace_allow_download if allow_download is None else allow_download,
                     timeout_s=download_timeout_s or s.mace_download_timeout_s,
+                    dispersion=dispersion,
+                    progress=progress,
                 )
                 return
             except Exception as exc:
@@ -243,23 +325,56 @@ class UMLIPEngine:
         self._init_fallback()
 
     # ------------------------------------------------------------ loading
-    def _load_mace(self, *, device: str, dtype: str, allow_download: bool, timeout_s: float) -> None:
-        path, name = resolve_mace_checkpoint(self.model, allow_download=allow_download, timeout_s=timeout_s)
+    def _load_mace(
+        self,
+        *,
+        device: str,
+        dtype: str,
+        allow_download: bool,
+        timeout_s: float,
+        dispersion: bool = False,
+        progress: Optional[ProgressFn] = None,
+    ) -> None:
+        if dispersion and not dispersion_available():
+            raise ModelUnavailableError(
+                "D3 dispersion needs the torch-dftd package, which is not installed in the backend "
+                "environment; install it (pip install torch-dftd) and restart the server"
+            )
+        path, name = resolve_mace_checkpoint(
+            self.model, allow_download=allow_download, timeout_s=timeout_s, progress=progress
+        )
         from mace.calculators import mace_mp
 
         dev = resolve_device(device)
-        self._calc = mace_mp(model=str(path), device=dev, default_dtype=dtype)
+        if dispersion:
+            # SumCalculator([MACECalculator, TorchDFTD3Calculator]): D3(BJ) with PBE parameters.
+            self._calc = mace_mp(
+                model=str(path), device=dev, default_dtype=dtype,
+                dispersion=True, dispersion_damping="bj", dispersion_xc="pbe",
+            )
+            name = f"{name}+d3"
+        else:
+            self._calc = mace_mp(model=str(path), device=dev, default_dtype=dtype)
         self.backend_name = name
         self.device = dev
         self.dtype = dtype
+        self.dispersion = bool(dispersion)
         self.checkpoint_path: Optional[Path] = path
+        self.model_id = self.model
 
     def _init_fallback(self) -> None:
         self._calc = AnalyticFallbackCalculator()
         self.backend_name = FALLBACK_BACKEND_NAME
         self.device = "cpu"
         self.dtype = "float64"
+        self.dispersion = False
         self.checkpoint_path = None
+        self.model_id = FALLBACK_BACKEND_NAME
+
+    @property
+    def label(self) -> str:
+        """Human-readable model name, e.g. ``"medium-mpa-0 + D3"``."""
+        return f"{self.model_id} + D3" if self.dispersion else self.model_id
 
     @property
     def is_mace(self) -> bool:
@@ -301,7 +416,7 @@ class UMLIPEngine:
         periodic = bool(np.all(work.pbc)) and work.cell.rank == 3
         with self.lock:
             work.calc = self._calc
-            self._calc.reset()  # never reuse results cached for another structure/thread
+            _reset_calculator(self._calc)  # never reuse results cached for another structure/thread
             energy = float(work.get_potential_energy())
             forces = np.array(work.get_forces(), dtype=float, copy=True)
             stress = (
@@ -333,7 +448,9 @@ class UMLIPEngine:
     @property
     def supports_batching(self) -> bool:
         """True when the backend can evaluate several graphs in one model call."""
-        if not self.is_mace:
+        if not self.is_mace or self.dispersion:
+            # The batched path runs the bare MACE model and would silently drop the D3
+            # term of the SumCalculator: dispersion engines evaluate sequentially.
             return False
         c = self._calc
         return (
@@ -589,6 +706,19 @@ class UMLIPEngine:
         )
 
 
+def _reset_calculator(calc) -> None:
+    """Drop cached results; also for ASE combination calculators (the D3 ``SumCalculator``
+    is a ``BaseCalculator`` without ``reset``) and each of their sub-calculators."""
+    reset = getattr(calc, "reset", None)
+    if callable(reset):
+        reset()
+        return
+    calc.results = {}
+    calc.atoms = None
+    for sub in getattr(getattr(calc, "mixer", None), "calcs", ()):
+        _reset_calculator(sub)
+
+
 def _wrap_in_place(work: Atoms) -> np.ndarray:
     """Wrap ``work`` into the cell along periodic axes; return its fractional coordinates."""
     if work.cell.rank == 3:
@@ -615,3 +745,289 @@ def reduced_formula(atoms: Atoms) -> str:
         return Composition(atoms.get_chemical_formula(mode="hill")).reduced_formula
     except Exception:
         return atoms.get_chemical_formula(mode="metal", empirical=True)
+
+
+# --------------------------------------------------------------------------
+# Model catalog and per-model engine registry (Phase B, IMPROVEMENT_SUGGESTIONS.md §6.1)
+# --------------------------------------------------------------------------
+@dataclass(frozen=True)
+class _CatalogEntry:
+    id: str
+    label: str
+    description: str
+    approx_size_mb: Optional[float]
+
+
+#: Foundation models offered in the model picker (ids are ``mace_mp_urls`` keys).
+#: Sizes are the checkpoint Content-Length of the release assets (MB = 1e6 bytes).
+MODEL_CATALOG: Tuple[_CatalogEntry, ...] = (
+    _CatalogEntry(
+        "small", "MACE-MP-0 small",
+        "MACE-MP-0 (L=0, 128 channels) trained on MPtrj (Materials Project relaxation trajectories, "
+        "PBE/PBE+U, MP2020-compatible energies). Fastest model; known to be soft: bulk moduli and "
+        "phonon frequencies are typically underestimated by 10-20 %. Use it to explore, then confirm "
+        "with a larger model.",
+        32.6,
+    ),
+    _CatalogEntry(
+        "medium", "MACE-MP-0 medium",
+        "MACE-MP-0 (L=1, 128 channels) trained on MPtrj (PBE/PBE+U, MP-compatible energies). "
+        "Stiffer and more accurate than small at roughly 2-3x the cost.",
+        44.4,
+    ),
+    _CatalogEntry(
+        "large", "MACE-MP-0 large",
+        "The original MACE-MP-0 large checkpoint (L=2) trained on MPtrj (PBE/PBE+U). Highest capacity "
+        "of the MP-0 family but the slowest, and not consistently better than medium; prefer "
+        "MACE-MPA-0 for confirmation runs.",
+        133.8,
+    ),
+    _CatalogEntry(
+        "medium-mpa-0", "MACE-MPA-0 medium",
+        "MACE-MPA-0 (medium) trained on MPtrj plus sAlex (a subsample of the Alexandria PBE/PBE+U "
+        "database), MP-compatible energies. Clearly more accurate than MACE-MP-0 on Matbench Discovery "
+        "(energies, stability, phonons); the recommended model for confirming results, including "
+        "hull energies against MP-based references.",
+        79.5,
+    ),
+    _CatalogEntry(
+        "medium-omat-0", "MACE-OMAT-0 medium",
+        "MACE-OMAT-0 (medium) trained on OMat24 (about 100 M strongly non-equilibrium PBE/PBE+U "
+        "structures: rattled and AIMD). Robust far from equilibrium and good for phonons. Its PBE(+U) "
+        "reference (pseudopotentials, U values, no MP2020 anion corrections) differs from the "
+        "Materials Project one, so its absolute and formation energies are not directly comparable "
+        "with MP DFT values (the studio hull re-evaluates its references with the same model, which "
+        "keeps E_hull self-consistent). Academic Software License (non-commercial use).",
+        79.5,
+    ),
+)
+_CATALOG_BY_ID: Dict[str, _CatalogEntry] = {e.id: e for e in MODEL_CATALOG}
+
+#: Max resident non-default MACE engines in the registry (the default singleton is extra).
+MAX_RESIDENT_MODELS = 2
+
+
+def _known_mace_urls() -> Dict[str, str]:
+    """``mace_mp_urls`` of the installed package ({} if mace is disabled or not importable)."""
+    if get_settings().umlip == "fallback":
+        return {}
+    try:
+        from mace.calculators.foundations_models import mace_mp_urls
+    except Exception:  # noqa: BLE001 - mace / torch missing or broken
+        return {}
+    return dict(mace_mp_urls)
+
+
+def default_model_id() -> str:
+    """Id of the process default model (``LATTICEFLOW_MACE_MODEL``); ``"lj-fallback"`` if it fell back.
+
+    Does not create the singleton if it does not exist yet (then the settings decide).
+    """
+    inst = UMLIPEngine._instance
+    if inst is not None:
+        return inst.model_id if inst.is_mace else FALLBACK_BACKEND_NAME
+    s = get_settings()
+    return FALLBACK_BACKEND_NAME if s.umlip == "fallback" else s.mace_model
+
+
+def list_models() -> List["ModelInfo"]:
+    """Models for ``GET /api/models``: catalog entries the installed mace knows, plus the fallback."""
+    from app.schemas.api import ModelInfo
+
+    default = default_model_id()
+    urls = _known_mace_urls()
+    d3 = bool(urls) and dispersion_available()
+    out: List[ModelInfo] = []
+    for entry in MODEL_CATALOG:
+        url = urls.get(entry.id)
+        if url is None:
+            continue
+        out.append(ModelInfo(
+            id=entry.id, label=entry.label, description=entry.description, family="mace",
+            checkpoint_cached=mace_cached_checkpoint_path(url).is_file(),
+            approx_size_mb=entry.approx_size_mb, supports_dispersion=d3, is_default=entry.id == default,
+        ))
+    if default != FALLBACK_BACKEND_NAME and default not in _CATALOG_BY_ID:
+        # A custom default (another mace_mp name or a local checkpoint): list it so the picker can return to it.
+        url = urls.get(default)
+        cached = Path(default).is_file() or (url is not None and mace_cached_checkpoint_path(url).is_file())
+        out.insert(0, ModelInfo(
+            id=default, label=f"MACE {Path(default).name}", family="mace",
+            description="The configured server default checkpoint (LATTICEFLOW_MACE_MODEL).",
+            checkpoint_cached=cached, approx_size_mb=None, supports_dispersion=d3, is_default=True,
+        ))
+    out.append(ModelInfo(
+        id=FALLBACK_BACKEND_NAME, label="Analytic fallback (LJ + Coulomb)", family="fallback",
+        description="Analytic Lennard-Jones + damped-shifted-force Coulomb potential with generic "
+        "parameters. Not a materials model: numbers are qualitative only. Used when MACE is "
+        "unavailable, and for testing.",
+        checkpoint_cached=True, approx_size_mb=None, supports_dispersion=False,
+        is_default=default == FALLBACK_BACKEND_NAME,
+    ))
+    return out
+
+
+class _EngineRegistry:
+    """Process-wide engines keyed by (model_id, dispersion), LRU-bounded, thread-safe.
+
+    * At most ``MAX_RESIDENT_MODELS`` non-default MACE engines are held (LRU).
+      An evicted engine is dropped from the registry, garbage-collected and the
+      CUDA cache emptied. A session still using it keeps it alive (and keeps
+      working) until it switches or disconnects; while alive it is tracked
+      weakly and reused rather than loaded a second time.
+    * The analytic fallback engine is cheap and cached separately.
+    * Loads are serialised by one lock (a concurrent request for the same key
+      waits and then gets the same engine); lookups of resident engines never
+      wait for a load.
+    """
+
+    def __init__(self) -> None:
+        self._lock = threading.Lock()
+        self._load_lock = threading.Lock()
+        self._lru: "collections.OrderedDict[Tuple[str, bool], UMLIPEngine]" = collections.OrderedDict()
+        self._live: "weakref.WeakValueDictionary[Tuple[str, bool], UMLIPEngine]" = weakref.WeakValueDictionary()
+        self._fallback: Optional[UMLIPEngine] = None
+
+    def _lookup(self, key: Tuple[str, bool]) -> Tuple[Optional[UMLIPEngine], List[UMLIPEngine]]:
+        """Under ``_lock``: the engine for ``key`` (moved to MRU) and the engines that evicted."""
+        engine = self._lru.get(key)
+        if engine is not None:
+            self._lru.move_to_end(key)
+            return engine, []
+        engine = self._live.get(key)
+        if engine is None:
+            return None, []
+        return engine, self._insert(key, engine)
+
+    def _insert(self, key: Tuple[str, bool], engine: UMLIPEngine) -> List[UMLIPEngine]:
+        self._lru[key] = engine
+        self._live[key] = engine
+        self._lru.move_to_end(key)
+        evicted = []
+        while len(self._lru) > MAX_RESIDENT_MODELS:
+            _, old = self._lru.popitem(last=False)
+            evicted.append(old)
+        return evicted
+
+    @staticmethod
+    def _release(evicted: List[UMLIPEngine]) -> None:
+        """Drop the last registry references to ``evicted`` and hand freed GPU memory back."""
+        if not evicted:
+            return
+        cuda = any(str(e.device).startswith("cuda") for e in evicted)
+        names = [e.backend_name for e in evicted]
+        evicted.clear()
+        gc.collect()
+        if cuda:
+            try:
+                import torch
+
+                torch.cuda.empty_cache()
+            except Exception:  # noqa: BLE001
+                pass
+        logger.info("evicted force field(s) %s from the model registry", names)
+
+    def get(self, model_id: str, dispersion: bool, progress: Optional[ProgressFn]) -> UMLIPEngine:
+        if model_id == FALLBACK_BACKEND_NAME:
+            if dispersion:
+                raise ModelUnavailableError("D3 dispersion is only available for MACE models, not the analytic fallback")
+            with self._lock:
+                if self._fallback is None:
+                    self._fallback = UMLIPEngine(backend="fallback")
+                return self._fallback
+        if get_settings().umlip == "fallback":
+            raise ModelUnavailableError(
+                f"MACE model {model_id!r} is unavailable: the server runs with LATTICEFLOW_UMLIP=fallback"
+            )
+        urls = _known_mace_urls()
+        if model_id not in urls:
+            known = ", ".join([e.id for e in MODEL_CATALOG if e.id in urls] + [FALLBACK_BACKEND_NAME])
+            raise ModelUnavailableError(f"unknown model {model_id!r}; available: {known}")
+        key = (model_id, bool(dispersion))
+        with self._lock:
+            engine, evicted = self._lookup(key)
+        self._release(evicted)
+        if engine is not None:
+            return engine
+        with self._load_lock:
+            with self._lock:
+                engine, evicted = self._lookup(key)  # loaded by a concurrent request meanwhile?
+            self._release(evicted)
+            if engine is not None:
+                return engine
+            label = f"{model_id} + D3" if dispersion else model_id
+            _safe_progress(progress, 0, 0, f"Loading {label}")
+            try:
+                engine = _build_engine(model_id, dispersion, progress)
+            except ModelUnavailableError:
+                raise
+            except Exception as exc:  # noqa: BLE001
+                cause = exc.__cause__ if exc.__cause__ is not None else exc
+                if isinstance(cause, ModelUnavailableError):
+                    raise cause from None
+                raise ModelUnavailableError(f"model {label!r} could not be loaded: {cause}") from exc
+            _safe_progress(progress, 1, 1, f"Loaded {engine.backend_name} on {engine.device}")
+            with self._lock:
+                evicted = self._insert(key, engine)
+            self._release(evicted)
+            return engine
+
+    def resident(self) -> List[Tuple[str, bool]]:
+        """Keys of the engines currently held (LRU order, oldest first)."""
+        with self._lock:
+            return list(self._lru)
+
+    def clear(self) -> None:
+        with self._lock:
+            evicted = list(self._lru.values())
+            self._lru.clear()
+            self._live = weakref.WeakValueDictionary()
+            self._fallback = None
+        self._release(evicted)
+
+
+def _build_engine(model_id: str, dispersion: bool, progress: Optional[ProgressFn]) -> UMLIPEngine:
+    """Load one registry engine (module-level so tests can substitute it)."""
+    return UMLIPEngine(backend="mace", model=model_id, dispersion=dispersion, progress=progress)
+
+
+_REGISTRY = _EngineRegistry()
+
+
+def get_engine(
+    model_id: Optional[str] = None, dispersion: bool = False, *, progress: Optional[ProgressFn] = None
+) -> UMLIPEngine:
+    """Engine for ``model_id`` (+ D3(BJ) when ``dispersion``).
+
+    ``None`` or the default model without dispersion returns the process
+    singleton (``UMLIPEngine.get_instance()``), so existing behaviour is
+    unchanged; ``None`` with dispersion means the default model + D3. Anything
+    else comes from a thread-safe, LRU-bounded registry (:class:`_EngineRegistry`).
+    Loading resolves the checkpoint through the bounded download path and
+    reports ``progress(done_bytes, total_bytes, message)`` (once at the start
+    with total 0, during a download, and once at the end). Raises
+    :class:`ModelUnavailableError` for unknown ids, a checkpoint that is not
+    cached while downloads are disabled, a missing torch-dftd (D3), or any
+    other load failure.
+    """
+    default = UMLIPEngine.get_instance() if model_id is not None or not dispersion else None
+    if model_id is None:
+        if not dispersion:
+            return default  # type: ignore[return-value]
+        model_id = default_model_id()
+    model_id = str(model_id).strip()
+    if not dispersion:
+        assert default is not None
+        if model_id == (default.model_id if default.is_mace else FALLBACK_BACKEND_NAME):
+            return default
+    return _REGISTRY.get(model_id, bool(dispersion), progress)
+
+
+def resident_models() -> List[Tuple[str, bool]]:
+    """(model_id, dispersion) of the registry engines currently held, oldest first."""
+    return _REGISTRY.resident()
+
+
+def reset_registry() -> None:
+    """Drop every registry engine (tests). The default singleton is untouched."""
+    _REGISTRY.clear()

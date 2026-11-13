@@ -19,6 +19,7 @@ seekpath             # 2.2.2
 pyxtal               # 1.1.5 (Wyckoff tables for app/core/flow_generator.py)
 torch                # 2.6.0+cu124
 mace-torch           # 0.3.17
+torch-dftd           # 0.5.3 (D3 dispersion for MACE models, Phase B)
 mp-api               # 0.46.5
 
 # dev

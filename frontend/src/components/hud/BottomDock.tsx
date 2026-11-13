@@ -5,21 +5,29 @@
  *   relaxation  during and after a relaxation / Follow Instability
  *   dos         phonon DOS + thermodynamics (after PHONON_DOS_DATA, or with a Compute button after a shake-test)
  *   eos         equation of state (after "Compute K")
+ *   elastic     elastic tensor C_ij (Phase B, on demand)
+ *   xrd         simulated powder diffraction (Phase B, on demand)
+ * Every pane header carries an export menu (CSV / PNG / publication PNG, §4.2).
  * Panes computed with the LJ fallback carry an "analytic fallback" label (§6.4).
  * Collapsed state, height (drag the top edge), hidden panes and pane widths
  * (drag the dividers) are kept in localStorage (store.setDock, try/catch).
  */
 import { ChevronDown, ChevronUp, X } from "lucide-react";
 import { useRef, type PointerEvent as ReactPointerEvent, type ReactNode } from "react";
-import { availablePanes } from "../../services/dockActions";
-import { DOCK_PANES, useCrystalStore, type DockPane } from "../../store/useCrystalStore";
+import { availablePanes, showPane } from "../../services/dockActions";
+import { commands } from "../../services/wsClient";
+import { DOCK_PANES, ON_DEMAND_PANES, useCrystalStore, type DockPane } from "../../store/useCrystalStore";
 import { followStatusText, transitionText } from "../../utils/followText";
 import { PhononBandChart } from "../charts/PhononBandChart";
 import { RdfChart } from "../charts/RdfChart";
 import { RelaxationCurve } from "../charts/RelaxationCurve";
+import { DiffractionPane } from "./DiffractionPane";
 import { DosPane } from "./DosPane";
+import { ElasticPane } from "./ElasticPane";
 import { EosPane } from "./EosPane";
+import { ExportMenu, usePaneExportItems, type ExportItem } from "./ExportMenu";
 import { PhononControlBar } from "./PhononControlBar";
+import { PhononInfoStrip } from "./PhononInfoStrip";
 import { FallbackTag, cx } from "./ui";
 
 const TITLES: Record<DockPane, string> = {
@@ -28,10 +36,38 @@ const TITLES: Record<DockPane, string> = {
   rdf: "Radial distribution g(r)",
   relaxation: "Relaxation",
   eos: "Equation of state E(V)",
+  elastic: "Elastic tensor C_ij",
+  xrd: "Powder diffraction",
 };
-const TOGGLE_LABELS: Record<DockPane, string> = { dispersion: "dispersion", dos: "DOS", rdf: "g(r)", relaxation: "relaxation", eos: "EOS" };
+const TOGGLE_LABELS: Record<DockPane, string> = {
+  dispersion: "dispersion",
+  dos: "DOS",
+  rdf: "g(r)",
+  relaxation: "relaxation",
+  eos: "EOS",
+  elastic: "elastic",
+  xrd: "XRD",
+};
 /** Panes whose numbers come from the uMLIP and get the fallback watermark. */
-const MODEL_PANES: ReadonlySet<DockPane> = new Set<DockPane>(["dispersion", "dos", "eos"]);
+const MODEL_PANES: ReadonlySet<DockPane> = new Set<DockPane>(["dispersion", "dos", "eos", "elastic"]);
+
+function PaneExport({ pane, bodyRef }: { pane: DockPane; bodyRef: React.RefObject<HTMLDivElement | null> }) {
+  const exportPending = useCrystalStore((s) => s.phononExportPending);
+  const hasPhonon = useCrystalStore((s) => s.phonon !== null);
+  const extra: ExportItem[] =
+    pane === "dispersion"
+      ? [
+          {
+            label: exportPending ? "phonopy file (preparing…)" : "phonopy file (phonopy_params.yaml)",
+            disabled: !hasPhonon || exportPending,
+            title: "Force constants + structure for continuing in phonopy",
+            run: () => void commands.exportPhonons(),
+          },
+        ]
+      : [];
+  const items = usePaneExportItems(pane, bodyRef, extra);
+  return <ExportMenu items={items} title={`Export ${TITLES[pane].toLowerCase()}`} />;
+}
 
 export { availablePanes };
 
@@ -58,17 +94,19 @@ function RelaxationHeader() {
 }
 
 function Pane({ pane, weight, children, onHide }: { pane: DockPane; weight: number; children: ReactNode; onHide(): void }) {
+  const bodyRef = useRef<HTMLDivElement>(null);
   return (
     <div className="flex min-w-0 flex-col rounded-lg border border-white/[0.06] bg-white/[0.015]" style={{ flex: `${weight} 1 0` }} data-pane={pane}>
       <div className="flex h-7 shrink-0 items-center gap-2 px-2.5">
         <span className="shrink-0 text-[10px] font-semibold tracking-[0.16em] text-slate-400 uppercase">{TITLES[pane]}</span>
         <span className="min-w-0 flex-1 truncate">{pane === "relaxation" && <RelaxationHeader />}</span>
         {MODEL_PANES.has(pane) && <FallbackTag />}
+        <PaneExport pane={pane} bodyRef={bodyRef} />
         <button type="button" title="Hide pane" className="text-slate-600 hover:text-slate-300" onClick={onHide}>
           <X size={12} />
         </button>
       </div>
-      <div className="flex min-h-0 flex-1 px-2 pb-2">
+      <div ref={bodyRef} className="flex min-h-0 flex-1 px-2 pb-2">
         {children}
       </div>
     </div>
@@ -81,6 +119,7 @@ export function BottomDock() {
   const available = useCrystalStore((s) => availablePanes(s).join(","));
   const panes = (available.split(",") as DockPane[]).filter((p) => !dock.hidden.includes(p));
   const bodyRef = useRef<HTMLDivElement>(null);
+  const hasCrystal = useCrystalStore((s) => s.crystal !== null);
 
   const startResize = (e: ReactPointerEvent) => {
     e.preventDefault();
@@ -138,12 +177,15 @@ export function BottomDock() {
           {DOCK_PANES.map((p) => {
             const isAvail = available.split(",").includes(p);
             const shown = isAvail && !dock.hidden.includes(p);
+            // On-demand panes (elastic, XRD) can be opened from the toggle once a structure exists.
+            const onDemand = !isAvail && ON_DEMAND_PANES.includes(p) && hasCrystal;
             return (
               <button
                 key={p}
                 type="button"
-                disabled={!isAvail}
-                onClick={() => toggleHidden(p)}
+                disabled={!isAvail && !onDemand}
+                title={onDemand ? `Open the ${TITLES[p].toLowerCase()} pane` : undefined}
+                onClick={() => (onDemand ? showPane(p) : toggleHidden(p))}
                 className={cx(
                   "rounded px-1.5 py-0.5 font-mono text-[10px] transition-colors disabled:opacity-30",
                   shown ? "bg-cyan-400/15 text-cyan-200" : "text-slate-500 hover:text-slate-300",
@@ -170,8 +212,11 @@ export function BottomDock() {
                 {p === "dispersion" ? (
                   <div className="flex h-full w-full gap-3">
                     <PhononControlBar />
-                    <div className="min-w-0 flex-1">
-                      <PhononBandChart />
+                    <div className="flex min-w-0 flex-1 flex-col gap-1">
+                      <PhononInfoStrip />
+                      <div className="relative min-h-0 flex-1">
+                        <PhononBandChart />
+                      </div>
                     </div>
                   </div>
                 ) : p === "rdf" ? (
@@ -180,6 +225,10 @@ export function BottomDock() {
                   <DosPane />
                 ) : p === "eos" ? (
                   <EosPane />
+                ) : p === "elastic" ? (
+                  <ElasticPane />
+                ) : p === "xrd" ? (
+                  <DiffractionPane />
                 ) : (
                   <RelaxationCurve />
                 )}

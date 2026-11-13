@@ -7,7 +7,7 @@
 import { useRef, useState } from "react";
 import { interpAt } from "../../utils/chartData";
 import { niceTicks } from "../../utils/bandChart";
-import { CHART_COLORS, CHART_FONT, scale, useCanvasChart } from "./useCanvasChart";
+import { CHART_COLORS, CHART_FONT, renderState, scale, useCanvasChart } from "./useCanvasChart";
 
 export interface LineSeries {
   label: string;
@@ -191,6 +191,25 @@ export function LineChart(p: LineChartProps) {
         ctx.textAlign = px > (xL + xR) / 2 ? "right" : "left";
         ctx.textBaseline = m.labelAt === "bottom" ? "bottom" : "top";
         ctx.fillText(m.label, px + (px > (xL + xR) / 2 ? -4 : 4), m.labelAt === "bottom" ? yB - 2 : yT + 1);
+      }
+
+      if (renderState.exporting) {
+        // PNG export: the HTML legend is not part of the canvas, draw it in.
+        if (p.series.length >= 2) {
+          ctx.font = CHART_FONT;
+          ctx.textAlign = "left";
+          ctx.textBaseline = "middle";
+          let lx = xR;
+          for (const s of [...p.series].reverse()) {
+            const w = ctx.measureText(s.label).width;
+            lx -= w + 22;
+            ctx.fillStyle = s.color;
+            ctx.fillRect(lx, yT + 6, 12, 2);
+            ctx.fillStyle = "rgba(226, 232, 240, 0.9)";
+            ctx.fillText(s.label, lx + 16, yT + 7);
+          }
+        }
+        return;
       }
 
       if (hoverX !== null) {

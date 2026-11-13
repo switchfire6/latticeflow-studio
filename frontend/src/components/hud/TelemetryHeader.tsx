@@ -2,10 +2,11 @@
  * Top telemetry bar (§6.3): formula | spacegroup (#n), E/atom, max |F| and
  * pressure with the stress-aware RELAXED badge (§3.2), bulk modulus (with an
  * on-demand "Compute K", §3.3) and E_hull when known, the dynamical-stability
- * badge after a shake-test, and the connection / uMLIP backend indicator
- * (lj-fallback is shown prominently and watermarks K / E_hull, §6.4).
+ * badge after a shake-test, and the connection / uMLIP model indicator
+ * (lj-fallback is shown prominently and watermarks K / E_hull, §6.4; Phase B:
+ * the badge shows the session's model and opens the model picker, §6.1).
  */
-import { Activity, AlertTriangle, Atom, Gauge, Loader2 } from "lucide-react";
+import { Atom, Gauge, Loader2 } from "lucide-react";
 import type { ReactNode } from "react";
 import { displayedEHull } from "../../services/hullActions";
 import { showPane } from "../../services/dockActions";
@@ -16,6 +17,7 @@ import { F_TOL_THZ, type CrystalStatePayload } from "../../types/protocol";
 import { relaxationVerdict, type RelaxationVerdict } from "../../utils/structureInfo";
 import { formatFrequency, formatPressure, type PressureUnit } from "../../utils/units";
 import { HullControl } from "./HullPopover";
+import { ModelBadge } from "./ModelPicker";
 import { Badge, FallbackTag, FormulaText, cx } from "./ui";
 
 export { FormulaText };
@@ -143,28 +145,11 @@ function StabilityBadge() {
 function ConnectionIndicator() {
   const connection = useCrystalStore((s) => s.connection);
   const attempt = useCrystalStore((s) => s.reconnectAttempt);
-  const health = useCrystalStore((s) => s.health);
-  const healthError = useCrystalStore((s) => s.healthError);
   const dot = connection === "open" ? "bg-emerald-400 shadow-[0_0_8px_#34d399]" : connection === "connecting" ? "bg-amber-400 animate-pulse" : "bg-rose-500";
   const label = connection === "open" ? "live" : connection === "connecting" ? "connecting" : attempt > 0 ? `retry #${attempt}` : "offline";
-  const fallback = health?.umlip_backend === "lj-fallback";
   return (
     <div className="flex shrink-0 items-center gap-3 pr-4">
-      {health ? (
-        fallback ? (
-          <Badge tone="amber" pulse title={health.load_error ?? "MACE-MP-0 could not be loaded"}>
-            <AlertTriangle size={11} /> lj-fallback (MACE not loaded)
-          </Badge>
-        ) : (
-          <Badge tone="cyan" title={`device ${health.device}, dtype ${health.dtype}`}>
-            <Activity size={11} /> {health.umlip_backend} · {health.device}
-          </Badge>
-        )
-      ) : (
-        <span className="font-mono text-[11px] text-slate-500" title={healthError ?? undefined}>
-          backend {healthError ? "unreachable" : "…"}
-        </span>
-      )}
+      <ModelBadge />
       <span className="flex items-center gap-1.5 font-mono text-[11px] text-slate-400">
         <span className={cx("h-2 w-2 rounded-full", dot)} />
         {label}

@@ -1,6 +1,7 @@
 /**
  * Layout (§6.3): telemetry header on top, generator sidebar on the left, the
- * 3D viewport filling the rest with its overlays, and a collapsible charts dock.
+ * 3D viewport filling the rest with its overlays (Phase B: the stability
+ * scorecard top right), and a collapsible charts dock.
  */
 import { useEffect, useState, type ComponentType } from "react";
 import { BottomDock } from "./components/hud/BottomDock";
@@ -9,6 +10,8 @@ import { TelemetryHeader } from "./components/hud/TelemetryHeader";
 import { Toasts } from "./components/hud/Toasts";
 import { TransmuteToolbar } from "./components/hud/TransmuteToolbar";
 import { ViewportDropZone } from "./components/hud/ImportExport";
+import { refreshModels } from "./components/hud/ModelPicker";
+import { Scorecard } from "./components/hud/Scorecard";
 import { DisplayPanel, EigenmodePill, FollowBanner, StreamProgress, ToolModeBar } from "./components/hud/ViewportOverlays";
 import { api } from "./services/apiClient";
 import { commands, sessionMemory, studio } from "./services/wsClient";
@@ -67,6 +70,7 @@ function useBackend() {
       try {
         st.setHealth(await api.health());
         if (st.presets.length === 0) st.setPresets(await api.presets());
+        if (!useCrystalStore.getState().models) void refreshModels();
       } catch (e) {
         st.setHealth(null, e instanceof Error ? e.message : String(e));
       }
@@ -110,6 +114,9 @@ export function App() {
             <div className="absolute top-3 left-1/2 flex -translate-x-1/2 flex-col items-center gap-2">
               <StreamProgress />
               <FollowBanner />
+            </div>
+            <div className="absolute top-3 right-3">
+              <Scorecard />
             </div>
             <div className="absolute bottom-3 left-3">
               <DisplayPanel />

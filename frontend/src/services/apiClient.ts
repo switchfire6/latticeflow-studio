@@ -5,13 +5,24 @@
 import { apiBaseUrl } from "../config";
 import type {
   CrystalStatePayload,
+  DiffractionRequest,
+  DiffractionResponse,
   ErrorResponse,
   ExportRequest,
   HealthResponse,
   HullEvaluateRequest,
   HullEvaluateResponse,
+  ModelListResponse,
+  MPSearchResponse,
+  MPStructureResponse,
   PresetInfo,
 } from "../types/protocol";
+
+/** The session's model for model-dependent REST calls (hull); null = process default. */
+export interface ModelSelection {
+  model_id: string | null;
+  dispersion: boolean;
+}
 
 export class ApiError extends Error {
   readonly status: number;
@@ -82,9 +93,16 @@ export function createApiClient(opts: ApiClientOptions = {}) {
     /** Stateless preview: parse a CIF and evaluate it (does not change the WebSocket session). */
     importCif: (cif: string, signal?: AbortSignal) => postJson<CrystalStatePayload>("/import/cif", { cif }, signal),
 
-    /** Relaxes the candidate first by default (§5.11), like the reference phases. */
-    hullEvaluate: (crystal: CrystalStatePayload, signal?: AbortSignal, relax = true) =>
-      postJson<HullEvaluateResponse>("/hull/evaluate", { crystal, relax } satisfies HullEvaluateRequest, signal),
+    /** Relaxes the candidate first by default (§5.11), like the reference phases; Phase B: with the session's model. */
+    hullEvaluate: (crystal: CrystalStatePayload, signal?: AbortSignal, relax = true, model?: ModelSelection | null) =>
+      postJson<HullEvaluateResponse>("/hull/evaluate", hullRequestBody(crystal, relax, model), signal),
+
+    // ---- Phase B
+    models: (signal?: AbortSignal) => getJson<ModelListResponse>("/models", signal),
+    diffraction: (body: DiffractionRequest, signal?: AbortSignal) => postJson<DiffractionResponse>("/diffraction", body, signal),
+    mpSearch: (q: string, signal?: AbortSignal) => getJson<MPSearchResponse>(`/mp/search?q=${encodeURIComponent(q.trim())}`, signal),
+    mpStructure: (materialId: string, signal?: AbortSignal) =>
+      getJson<MPStructureResponse>(`/mp/structure/${encodeURIComponent(materialId.trim())}`, signal),
 
     /** POST /api/export/cif -> { blob, filename } (filename from Content-Disposition). */
     async exportStructure(crystal: CrystalStatePayload, format: ExportFormat | ExportOptions = "cif", signal?: AbortSignal) {
@@ -117,6 +135,16 @@ export function createApiClient(opts: ApiClientOptions = {}) {
       return filename;
     },
   };
+}
+
+/** Hull request body; the model fields are sent only for a session model. */
+export function hullRequestBody(crystal: CrystalStatePayload, relax: boolean, model?: ModelSelection | null): HullEvaluateRequest {
+  const body: HullEvaluateRequest = { crystal, relax };
+  if (model && model.model_id) {
+    body.model_id = model.model_id;
+    body.dispersion = model.dispersion;
+  }
+  return body;
 }
 
 export type ExportFormat = NonNullable<ExportRequest["format"]>;

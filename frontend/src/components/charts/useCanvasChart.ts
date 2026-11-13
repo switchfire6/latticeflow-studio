@@ -13,6 +13,19 @@ export interface ChartSize {
 
 export type DrawFn = (ctx: CanvasRenderingContext2D, size: ChartSize) => void;
 
+/**
+ * Set while a chart is drawn: the device-pixel ratio of the target and whether
+ * it is an offscreen export render (charts may then draw their HTML legends
+ * into the canvas and bypass on-screen caches).
+ */
+export const renderState = { dpr: 1, exporting: false };
+
+/** Offscreen renderers of the mounted charts (PNG export, utils/pngExport.ts). */
+const renderers = new WeakMap<HTMLCanvasElement, (dpr: number) => HTMLCanvasElement>();
+export function chartRenderer(canvas: HTMLCanvasElement): ((dpr: number) => HTMLCanvasElement) | null {
+  return renderers.get(canvas) ?? null;
+}
+
 export function useCanvasChart(
   canvasRef: RefObject<HTMLCanvasElement | null>,
   draw: DrawFn,
@@ -32,6 +45,24 @@ export function useCanvasChart(
     let dirty = true;
     let lastKey: unknown = Symbol("init");
     let lastDraw: DrawFn | null = null;
+
+    renderers.set(canvas, (dpr: number) => {
+      const off = document.createElement("canvas");
+      off.width = Math.max(1, Math.round(size.width * dpr));
+      off.height = Math.max(1, Math.round(size.height * dpr));
+      const octx = off.getContext("2d");
+      if (!octx) return off;
+      octx.setTransform(dpr, 0, 0, dpr, 0, 0);
+      const prev = { ...renderState };
+      renderState.dpr = dpr;
+      renderState.exporting = true;
+      try {
+        drawRef.current(octx, size);
+      } finally {
+        Object.assign(renderState, prev);
+      }
+      return off;
+    });
 
     const resize = () => {
       const rect = canvas.parentElement?.getBoundingClientRect() ?? canvas.getBoundingClientRect();
@@ -60,6 +91,8 @@ export function useCanvasChart(
         lastDraw = drawRef.current;
         ctx.save();
         ctx.clearRect(0, 0, size.width, size.height);
+        renderState.dpr = Math.min(globalThis.devicePixelRatio || 1, 2);
+        renderState.exporting = false;
         drawRef.current(ctx, size);
         ctx.restore();
       }
@@ -69,6 +102,7 @@ export function useCanvasChart(
     return () => {
       cancelAnimationFrame(raf);
       ro.disconnect();
+      renderers.delete(canvas);
     };
   }, [canvasRef]);
 }

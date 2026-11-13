@@ -7,6 +7,11 @@
  *
  * Clicking picks the nearest (q_index, band) and animates it at once: the
  * cached eigenvector of a labelled point, otherwise REQUEST_EIGENMODE.
+ *
+ * Phase B (§5.2): with `band_order` the branches are drawn connected through
+ * crossings (optionally one colour per branch), and the selected / hovered
+ * mode highlights its whole connected branch. Export renders (PNG) bypass the
+ * on-screen base-layer cache.
  */
 import { useMemo, useRef, useState, type MouseEvent } from "react";
 import { selectModeAt } from "../../services/phononActions";
@@ -14,8 +19,11 @@ import { useSettings } from "../../store/settings";
 import { useCrystalStore } from "../../store/useCrystalStore";
 import type { PhononAnalysisComplete } from "../../types/protocol";
 import { formatFrequency, frequencyFactor, frequencyUnitLabel, type FrequencyUnit } from "../../utils/units";
+import { SERIES_COLORS } from "../../utils/chartData";
 import {
+  branchOfBand,
   classifyBands,
+  connectedFrequencies,
   frequencyRange,
   isImaginarySegment,
   nearestMode,
@@ -24,7 +32,18 @@ import {
   qLabelAt,
   segmentBreaks,
 } from "../../utils/bandChart";
-import { CHART_COLORS, CHART_FONT, scale, useCanvasChart, type ChartSize } from "./useCanvasChart";
+import { CHART_COLORS, CHART_FONT, renderState, scale, useCanvasChart, type ChartSize } from "./useCanvasChart";
+
+/** Branch-ordered frequencies per analysis (connectedFrequencies is O(nq·nb)). */
+const branchCache = new WeakMap<PhononAnalysisComplete, number[][]>();
+export function branchRows(p: PhononAnalysisComplete): number[][] {
+  let rows = branchCache.get(p);
+  if (!rows) {
+    rows = connectedFrequencies(p.frequencies_thz, p.band_order);
+    branchCache.set(p, rows);
+  }
+  return rows;
+}
 
 const M = { left: 42, right: 10, top: 10, bottom: 20 };
 
@@ -43,11 +62,11 @@ function geometry(p: PhononAnalysisComplete, size: ChartSize): Geometry {
   };
 }
 
-function drawBase(ctx: CanvasRenderingContext2D, p: PhononAnalysisComplete, size: ChartSize, g: Geometry, unit: FrequencyUnit) {
+function drawBase(ctx: CanvasRenderingContext2D, p: PhononAnalysisComplete, size: ChartSize, g: Geometry, unit: FrequencyUnit, colorBranches: boolean) {
   const k = frequencyFactor(unit);
   const { x, y } = g;
   const d = p.kpath_distances;
-  const f = p.frequencies_thz;
+  const f = branchRows(p);
   const x0 = M.left;
   const x1 = size.width - M.right;
   const yTop = M.top;
@@ -94,25 +113,29 @@ function drawBase(ctx: CanvasRenderingContext2D, p: PhononAnalysisComplete, size
   ctx.lineTo(x1, Math.round(y(0)) + 0.5);
   ctx.stroke();
 
-  // branches: one batched path for real segments, one for imaginary
+  // branches: batched paths for real segments (one, or one per colour), one for imaginary
   const breaks = segmentBreaks(d);
   const nb = f[0]?.length ?? 0;
-  const real = new Path2D();
+  const nColors = colorBranches ? SERIES_COLORS.length : 1;
+  const real = Array.from({ length: nColors }, () => new Path2D());
   const imag = new Path2D();
   for (let b = 0; b < nb; b++) {
+    const realPath = real[b % nColors]!;
     for (let q = 0; q + 1 < d.length; q++) {
       if (breaks[q]) continue;
       const fa = f[q]![b]!;
       const fb = f[q + 1]![b]!;
-      const path = isImaginarySegment(fa, fb) ? imag : real;
+      const path = isImaginarySegment(fa, fb) ? imag : realPath;
       path.moveTo(x(d[q]!), y(fa));
       path.lineTo(x(d[q + 1]!), y(fb));
     }
   }
-  ctx.lineWidth = 1.2;
+  ctx.lineWidth = colorBranches ? 1.4 : 1.2;
   ctx.lineJoin = "round";
-  ctx.strokeStyle = CHART_COLORS.sky;
-  ctx.stroke(real);
+  real.forEach((path, i) => {
+    ctx.strokeStyle = colorBranches ? SERIES_COLORS[i]! : CHART_COLORS.sky;
+    ctx.stroke(path);
+  });
   ctx.lineWidth = 1.8;
   ctx.strokeStyle = CHART_COLORS.crimson;
   ctx.shadowColor = "rgba(255, 42, 84, 0.6)";
@@ -130,13 +153,15 @@ function drawBase(ctx: CanvasRenderingContext2D, p: PhononAnalysisComplete, size
   ctx.restore();
 }
 
-function drawBand(ctx: CanvasRenderingContext2D, p: PhononAnalysisComplete, g: Geometry, band: number, color: string, width: number) {
+/** Draw connected branch `branch` (= ascending band index without a band_order). */
+function drawBand(ctx: CanvasRenderingContext2D, p: PhononAnalysisComplete, g: Geometry, branch: number, color: string, width: number) {
   const d = p.kpath_distances;
+  const rows = branchRows(p);
   const breaks = segmentBreaks(d);
   ctx.beginPath();
   for (let q = 0; q < d.length; q++) {
     const px = g.x(d[q]!);
-    const py = g.y(p.frequencies_thz[q]![band]!);
+    const py = g.y(rows[q]![branch]!);
     if (q === 0 || breaks[q - 1]) ctx.moveTo(px, py);
     else ctx.lineTo(px, py);
   }
@@ -150,6 +175,7 @@ export function PhononBandChart() {
   const selection = useCrystalStore((s) => s.modeSelection);
   const loaded = useCrystalStore((s) => s.selectedEigenmode);
   const unit = useSettings((s) => s.units.frequency);
+  const colorBranches = useSettings((s) => !!s.phonon.colorBranches);
   const [hover, setHover] = useState<{ qIndex: number; band: number } | null>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const geomRef = useRef<Geometry | null>(null);
@@ -162,8 +188,13 @@ export function PhononBandChart() {
       if (!phonon || phonon.kpath_distances.length === 0) return;
       const g = geometry(phonon, size);
       geomRef.current = g;
-      const dpr = Math.min(globalThis.devicePixelRatio || 1, 2);
-      const key = `${size.width}x${size.height}@${dpr}:${unit}`;
+      if (renderState.exporting) {
+        // Offscreen export: draw the base directly at the export resolution, no selection overlay.
+        drawBase(ctx, phonon, size, g, unit, colorBranches);
+        return;
+      }
+      const dpr = renderState.dpr;
+      const key = `${size.width}x${size.height}@${dpr}:${unit}:${colorBranches}`;
       let base = baseRef.current;
       if (!base || base.key !== key || (base.canvas as unknown as { _p?: unknown })._p !== phonon) {
         const c = document.createElement("canvas");
@@ -171,18 +202,21 @@ export function PhononBandChart() {
         c.height = Math.round(size.height * dpr);
         const bctx = c.getContext("2d")!;
         bctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-        drawBase(bctx, phonon, size, g, unit);
+        drawBase(bctx, phonon, size, g, unit, colorBranches);
         (c as unknown as { _p?: unknown })._p = phonon;
         base = baseRef.current = { canvas: c, key };
       }
       ctx.drawImage(base.canvas, 0, 0, size.width, size.height);
 
       const d = phonon.kpath_distances;
-      if (hover && (!selection || hover.band !== selection.band)) drawBand(ctx, phonon, g, hover.band, "rgba(226, 232, 240, 0.35)", 1.5);
-      if (selection) {
+      const order = phonon.band_order;
+      const hoverBranch = hover ? branchOfBand(order, hover.qIndex, hover.band) : null;
+      const selBranch = selection ? branchOfBand(order, selection.qIndex, selection.band) : null;
+      if (hoverBranch !== null && hoverBranch !== selBranch) drawBand(ctx, phonon, g, hoverBranch, "rgba(226, 232, 240, 0.35)", 1.5);
+      if (selection && selBranch !== null) {
         ctx.shadowColor = "rgba(34, 211, 238, 0.8)";
         ctx.shadowBlur = 8;
-        drawBand(ctx, phonon, g, selection.band, CHART_COLORS.cyan, 2.2);
+        drawBand(ctx, phonon, g, selBranch, CHART_COLORS.cyan, 2.2);
         ctx.shadowBlur = 0;
         const fq = phonon.frequencies_thz[selection.qIndex]?.[selection.band];
         if (fq !== undefined) {

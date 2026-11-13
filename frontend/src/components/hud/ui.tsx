@@ -3,6 +3,7 @@ import { ChevronDown, ChevronRight } from "lucide-react";
 import { useState, type ButtonHTMLAttributes, type ReactNode } from "react";
 import { useSettings } from "../../store/settings";
 import { useCrystalStore } from "../../store/useCrystalStore";
+import { activeModel, isFallback } from "../../utils/models";
 
 /** "SrTiO3" -> SrTiO₃ */
 export function FormulaText({ formula }: { formula: string }) {
@@ -287,7 +288,8 @@ export const FALLBACK_LABEL = "analytic fallback — not physical";
 
 /** Watermark for results computed with the LJ fallback calculator (§6.4). */
 export function FallbackTag({ compact, className }: { compact?: boolean; className?: string }) {
-  const fallback = useCrystalStore((s) => s.health?.umlip_backend === "lj-fallback");
+  // Phase B: the session's model when switched, else the process default.
+  const fallback = useCrystalStore((s) => isFallback(activeModel(s.model, s.health)));
   return <FallbackTagView active={fallback} compact={compact} className={className} />;
 }
 

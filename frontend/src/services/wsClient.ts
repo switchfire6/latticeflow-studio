@@ -23,22 +23,32 @@
  * phonon analysis). The StudioClient also restores the last committed
  * structure after a reconnect (SessionMemory) and can request the DOS after
  * every shake-test.
+ *
+ * Phase B: PROGRESS (per-command progress of long streams), the convergence
+ * check (PHONON_CONVERGENCE_RESULT, then the larger supercell's
+ * PHONON_ANALYSIS_COMPLETE and flags), ELASTIC_TENSOR_RESULT (stream kind
+ * "elastic", not state-changing), PHONON_EXPORT (downloaded as a file) and
+ * MODEL_CHANGED (stream kind "model"; the session's model, phonons dropped and
+ * the state version bumped so every model-dependent result reads stale). The
+ * StudioClient can chain a command after a relaxation ("Relax, then run").
  */
 import { wsUrl } from "../config";
-import { badgeCriteria, phononPayload, relaxPayload, useSettings } from "../store/settings";
-import { summarize, useCrystalStore, type CrystalStore, type StreamCommand, type ToastLevel } from "../store/useCrystalStore";
+import { badgeCriteria, elasticPayload, phononPayload, relaxPayload, useSettings } from "../store/settings";
+import { summarize, summarizePhonon, useCrystalStore, type CrystalStore, type StreamCommand, type ToastLevel } from "../store/useCrystalStore";
 import type {
   ClientCommand,
   ClientCommandMap,
   CrystalStatePayload,
   ErrorCode,
   ErrorPayload,
+  PhononExport,
   ServerEvent,
   ServerMessage,
   StructureTextFormat,
 } from "../types/protocol";
 import { registerDefaultSend } from "./phononActions";
 import { SessionMemory } from "./sessionMemory";
+import { downloadText } from "../utils/download";
 import { pickDefaultEigenmode } from "../utils/phonon";
 import { latticeLengths, phononWarning, relaxationVerdict, sameStructure } from "../utils/structureInfo";
 
@@ -54,6 +64,11 @@ const SERVER_EVENTS: ReadonlySet<string> = new Set<ServerEvent>([
   "BULK_MODULUS_RESULT",
   "PHONON_DOS_DATA",
   "HISTORY_STATE",
+  "PROGRESS",
+  "PHONON_CONVERGENCE_RESULT",
+  "ELASTIC_TENSOR_RESULT",
+  "PHONON_EXPORT",
+  "MODEL_CHANGED",
 ]);
 
 const STREAM_COMMANDS: ReadonlySet<ClientCommand> = new Set<ClientCommand>([
@@ -62,6 +77,9 @@ const STREAM_COMMANDS: ReadonlySet<ClientCommand> = new Set<ClientCommand>([
   "RUN_PHONON_SHAKE_TEST",
   "FOLLOW_INSTABILITY",
   "PERTURB_OR_TRANSMUTE_ATOM",
+  "CHECK_PHONON_CONVERGENCE",
+  "COMPUTE_ELASTIC_TENSOR",
+  "SET_MODEL",
 ]);
 
 /** Errors that arrive after a stream's terminal message and must not pop another stream. */
@@ -78,6 +96,7 @@ export const STATE_CHANGING_COMMANDS: ReadonlySet<ClientCommand> = new Set<Clien
   "REFINE_STRUCTURE",
   "UNDO",
   "REDO",
+  "SET_MODEL",
 ]);
 
 export const SESSION_RESTORED_TITLE = "Session restored";
@@ -119,6 +138,23 @@ export function describeError(p: ErrorPayload): { title: string; message: string
   }
   if (p.command === "REFINE_STRUCTURE") {
     return { title: "Symmetry refinement failed", message: p.message };
+  }
+  if (p.command === "SET_MODEL") {
+    return {
+      title: p.code === "MODEL_UNAVAILABLE" ? "Model unavailable" : "Model switch failed",
+      message: `${p.message || "The model could not be loaded."} The session keeps its current model.`,
+    };
+  }
+  if (p.command === "COMPUTE_ELASTIC_TENSOR") {
+    return { title: "Elastic tensor failed", message: p.message };
+  }
+  if (p.command === "CHECK_PHONON_CONVERGENCE") {
+    if (p.code === "NO_PHONON_ANALYSIS") return { title: "Phonons out of date", message: `Run the shake-test on the current structure before checking convergence${detail}.` };
+    if (p.code === "STRUCTURE_TOO_LARGE") return { title: "Supercell too large", message: `The next supercell exceeds the atom budget; convergence cannot be checked here${detail}.` };
+    return { title: "Convergence check failed", message: p.message };
+  }
+  if (p.command === "EXPORT_PHONON_DATA") {
+    return { title: "Phonon export failed", message: p.code === "NO_PHONON_ANALYSIS" ? `Run the shake-test first${detail}.` : p.message };
   }
   if (p.command === "LOAD_STRUCTURE" && p.code === "INVALID_ELEMENT") {
     return { title: "Element not supported", message: `The model covers Z ≤ 89 (H–Ac)${detail}.` };
@@ -243,11 +279,55 @@ export function dispatchServerMessage(store: CrystalStore, msg: ServerMessage): 
     case "PHONON_ANALYSIS_COMPLETE": {
       const p = msg.payload;
       session.awaitingActorFlags = true;
+      // The larger-supercell analysis of a convergence check keeps the check; a fresh shake-test drops it.
+      const convergence = session.convergenceArrived ? s.convergence : null;
+      session.convergenceArrived = false;
+      s.setConvergence(convergence);
       s.setPhonon(p);
+      s.setPhononSummary(summarizePhonon(p, s.frame.stateVersion, convergence));
       const mode = pickDefaultEigenmode(p.eigenmodes);
       s.selectEigenmode(mode);
       if (mode) s.setToolMode("PHONON_SHAKE");
-      s.endStream({ command: "RUN_PHONON_SHAKE_TEST" }) ?? s.endStream();
+      const head = session.streams[0];
+      if (head?.kind === "phonon") s.endStream();
+      else s.endStream({ command: "RUN_PHONON_SHAKE_TEST" }) ?? s.endStream({ command: "CHECK_PHONON_CONVERGENCE" }) ?? s.endStream();
+      s.clearProgress("RUN_PHONON_SHAKE_TEST");
+      s.clearProgress("CHECK_PHONON_CONVERGENCE");
+      return;
+    }
+
+    case "PHONON_CONVERGENCE_RESULT": {
+      session.convergenceArrived = true;
+      s.setConvergence(msg.payload);
+      return;
+    }
+
+    case "PROGRESS": {
+      s.setProgress(msg.payload);
+      return;
+    }
+
+    case "ELASTIC_TENSOR_RESULT": {
+      s.setElastic({ result: msg.payload, stateVersion: s.frame.stateVersion });
+      s.clearProgress("COMPUTE_ELASTIC_TENSOR");
+      s.endStream({ command: "COMPUTE_ELASTIC_TENSOR" });
+      return;
+    }
+
+    case "PHONON_EXPORT": {
+      s.setPhononExportPending(false);
+      return;
+    }
+
+    case "MODEL_CHANGED": {
+      // Phonons are invalidated server-side; every model-dependent result is now stale.
+      session.awaitingActorFlags = false;
+      session.convergenceArrived = false;
+      s.setModel(msg.payload);
+      s.clearProgress("SET_MODEL");
+      s.clearPhonon();
+      s.bumpStateVersion();
+      s.endStream({ command: "SET_MODEL" });
       return;
     }
 
@@ -293,6 +373,8 @@ export function dispatchServerMessage(store: CrystalStore, msg: ServerMessage): 
       const head = s.session.streams[0];
       if (head && head.command === stopped) s.endStream();
       else s.endStream({ command: stopped }) ?? s.endStream();
+      s.clearProgress(stopped);
+      if (stopped === "CHECK_PHONON_CONVERGENCE") session.convergenceArrived = false;
       if (s.frame.trails.count && stopped === "START_FLOW_GENERATION") s.frame.trails.endedAt = performance.now();
       return;
     }
@@ -304,6 +386,9 @@ export function dispatchServerMessage(store: CrystalStore, msg: ServerMessage): 
       s.pushToast(level ?? "error", title, message);
       if (p.command === "COMPUTE_BULK_MODULUS") s.setEosPending(false);
       if (p.command === "REQUEST_PHONON_DOS") s.setDosPending(false);
+      if (p.command === "EXPORT_PHONON_DATA") s.setPhononExportPending(false);
+      if (p.command === "CHECK_PHONON_CONVERGENCE") session.convergenceArrived = false;
+      if (p.command && !POST_TERMINAL_ERRORS.has(p.code)) s.clearProgress(p.command);
       if (p.command === "FOLLOW_INSTABILITY" && s.followResult && (s.followResult.status === "running" || p.code === "RELAXATION_DIVERGED")) {
         s.setFollowResult({ ...s.followResult, status: "failed" });
       }
@@ -339,6 +424,15 @@ export interface StudioClientOptions {
   memory?: SessionMemory | null;
   /** Request PHONON_DOS after every PHONON_ANALYSIS_COMPLETE when this returns true. */
   autoDos?: () => boolean;
+  /** PHONON_EXPORT handler (default: download the phonopy YAML). */
+  onPhononExport?: (p: PhononExport) => void;
+}
+
+/** A command queued behind a relaxation ("Relax, then run"). */
+interface RelaxChain {
+  streamId: number;
+  label: string;
+  next: () => void;
 }
 
 /**
@@ -378,7 +472,32 @@ export class StudioClient {
       random: opts.random ?? Math.random,
       memory: opts.memory ?? null,
       autoDos: opts.autoDos ?? (() => false),
+      onPhononExport: opts.onPhononExport ?? ((p) => downloadText(p.phonopy_yaml, p.filename || "phonopy_params.yaml", "application/x-yaml")),
     };
+  }
+
+  private chain: RelaxChain | null = null;
+
+  /** The label of the command waiting for the current relaxation (null = none). */
+  get chainedLabel(): string | null {
+    return this.chain?.label ?? null;
+  }
+
+  /**
+   * START_RELAXATION, then `next()` once it converges. If it stops, fails or
+   * ends unconverged, `next` is dropped with an info toast. Returns false when
+   * the socket is not open.
+   */
+  runAfterRelax(label: string, next: () => void, payload: ClientCommandMap["START_RELAXATION"]): boolean {
+    if (!this.send("START_RELAXATION", payload)) return false;
+    const entry = this.store.getState().session.streams.at(-1);
+    if (entry) this.chain = { streamId: entry.id, label, next };
+    return true;
+  }
+
+  /** Forget a queued "then run" (e.g. the user cancelled it). */
+  cancelChain(): void {
+    this.chain = null;
   }
 
   get memory(): SessionMemory | null {
@@ -431,6 +550,7 @@ export class StudioClient {
     this.socket = sock;
     sock.onopen = () => {
       this.attempt = 0;
+      this.chain = null;
       const st = this.store.getState();
       // A fresh server session auto-loads the default preset; forget the old one
       // (the remembered structure is re-sent once that auto-load arrives).
@@ -459,6 +579,7 @@ export class StudioClient {
         this.restoreFailures = 0;
       }
       this.restore = "idle";
+      this.chain = null;
       const st = this.store.getState();
       st.resetSession();
       st.setConnection("closed", this.attempt);
@@ -493,7 +614,22 @@ export class StudioClient {
       }
     }
 
+    const chain = this.chain;
+    const chainTracked = !!chain && this.store.getState().session.streams.some((x) => x.id === chain.streamId);
+
     dispatchServerMessage(this.store, msg);
+
+    if (msg.type === "PHONON_EXPORT") this.opts.onPhononExport(msg.payload);
+
+    if (chain && chainTracked && !this.store.getState().session.streams.some((x) => x.id === chain.streamId)) {
+      // The relaxation the chained command waits for has ended.
+      this.chain = null;
+      if (msg.type === "RELAXATION_FRAME" && msg.payload.converged) chain.next();
+      else {
+        const why = msg.type === "STREAM_STOPPED" ? "was stopped" : msg.type === "ERROR" ? "failed" : "did not converge";
+        this.store.getState().pushToast("info", `${chain.label} not started`, `The relaxation ${why}; run it again or start ${chain.label.toLowerCase()} anyway.`);
+      }
+    }
 
     if (msg.type === "PHONON_ANALYSIS_COMPLETE" && this.opts.autoDos()) {
       if (this.rawSend("REQUEST_PHONON_DOS", {})) this.store.getState().setDosPending(true);
@@ -542,7 +678,9 @@ export class StudioClient {
         st.session.relaxFmax = (payload as { fmax?: number }).fmax ?? 0.02;
       } else if (type === "PERTURB_OR_TRANSMUTE_ATOM") st.session.relaxFmax = 0.02;
       else if (type === "RUN_PHONON_SHAKE_TEST") {
-        st.session.phononSupercell = (payload as ClientCommandMap["RUN_PHONON_SHAKE_TEST"]).supercell_dim ?? [2, 2, 2];
+        const p = payload as ClientCommandMap["RUN_PHONON_SHAKE_TEST"];
+        st.session.phononSupercell = p.supercell_dim ?? [2, 2, 2];
+        st.session.phononMinLength = p.min_supercell_length ?? null;
       }
     }
     return true;
@@ -586,6 +724,13 @@ function sendOrToast<K extends ClientCommand>(type: K, payload: ClientCommandMap
 export function currentPhononWarning(crystal: CrystalStatePayload | null = studio.store.getState().frame.crystal): string | null {
   if (!crystal) return null;
   return phononWarning(relaxationVerdict(crystal, badgeCriteria(useSettings.getState().relax)));
+}
+
+/** "Relax, then …": START_RELAXATION with the user's settings, then `next` once it converges. */
+function relaxThen(label: string, next: () => void): boolean {
+  const ok = studio.runAfterRelax(label, next, relaxPayload(useSettings.getState().relax));
+  if (!ok) studio.store.getState().pushToast("warning", "Not connected", "Cannot start the relaxation: the studio socket is not open.");
+  return ok;
 }
 
 export const commands = {
@@ -637,4 +782,19 @@ export const commands = {
   requestEigenmode: (qIndex: number, bandIndex: number) =>
     sendOrToast("REQUEST_EIGENMODE", { q_index: qIndex, band_index: bandIndex }),
   followInstability: (p: ClientCommandMap["FOLLOW_INSTABILITY"]) => sendOrToast("FOLLOW_INSTABILITY", p),
+
+  // ---- Phase B
+  /** Re-run the phonons in the next larger supercell and compare (null dims = current + 1). */
+  checkConvergence: (p: ClientCommandMap["CHECK_PHONON_CONVERGENCE"] = {}) => sendOrToast("CHECK_PHONON_CONVERGENCE", p),
+  /** COMPUTE_ELASTIC_TENSOR with the user's settings (overridable). */
+  computeElastic: (p: ClientCommandMap["COMPUTE_ELASTIC_TENSOR"] = {}) =>
+    sendOrToast("COMPUTE_ELASTIC_TENSOR", { ...elasticPayload(useSettings.getState().elastic), ...p }),
+  /** EXPORT_PHONON_DATA; the PHONON_EXPORT answer is downloaded as a phonopy YAML file. */
+  exportPhonons: () => {
+    const ok = sendOrToast("EXPORT_PHONON_DATA", {});
+    if (ok) studio.store.getState().setPhononExportPending(true);
+    return ok;
+  },
+  setModel: (p: ClientCommandMap["SET_MODEL"]) => sendOrToast("SET_MODEL", p),
+  relaxThen,
 };

@@ -3,20 +3,15 @@
  * (right axis, log scale, amber) vs step for the current relaxation or follow
  * stream, with the fmax target line. Reads the transient relaxation history
  * and redraws on `session.relaxVersion` (no React render per frame).
+ * The force axis is clamped at 1e-12 eV/Å and its decade labels are thinned
+ * to what fits the chart height (Phase B fix for tiny residual forces).
  */
 import { useRef } from "react";
 import { useCrystalStore } from "../../store/useCrystalStore";
-import { niceTicks } from "../../utils/bandChart";
+import { decadeLabel, LOG_AXIS_FLOOR, logAxisTicks, niceTicks } from "../../utils/bandChart";
 import { CHART_COLORS, CHART_FONT, scale, useCanvasChart } from "./useCanvasChart";
 
 const M = { left: 52, right: 46, top: 12, bottom: 20 };
-
-/** Log-axis decades covering [lo, hi]. */
-export function logDecades(lo: number, hi: number): number[] {
-  const out: number[] = [];
-  for (let e = Math.floor(Math.log10(lo)); e <= Math.ceil(Math.log10(hi)); e++) out.push(10 ** e);
-  return out;
-}
 
 export function RelaxationCurve() {
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -48,23 +43,24 @@ export function RelaxationCurve() {
       }
       const ePad = Math.max(1e-4, (eHi - eLo) * 0.08);
       const yE = scale(eLo - ePad, eHi + ePad, yBot, M.top);
-      const decades = logDecades(fLo, fHi);
-      const lLo = Math.log10(decades[0]!);
-      const lHi = Math.log10(decades[decades.length - 1]!);
-      const yF = (v: number) => scale(lLo, lHi, yBot, M.top)(Math.log10(Math.max(v, 1e-12)));
+      const axis = logAxisTicks(fLo, fHi, Math.max(2, Math.floor((yBot - M.top) / 22)));
+      const decades = axis.ticks.map((e) => 10 ** e);
+      const lLo = axis.lo;
+      const lHi = axis.hi;
+      const yF = (v: number) => scale(lLo, lHi, yBot, M.top)(Math.log10(Math.max(v, LOG_AXIS_FLOOR)));
 
       ctx.font = CHART_FONT;
       // force decades (right) + grid
       ctx.textAlign = "left";
       ctx.textBaseline = "middle";
-      for (const d of decades) {
+      for (const [i, d] of decades.entries()) {
         ctx.strokeStyle = CHART_COLORS.grid;
         ctx.beginPath();
         ctx.moveTo(M.left, Math.round(yF(d)) + 0.5);
         ctx.lineTo(size.width - M.right, Math.round(yF(d)) + 0.5);
         ctx.stroke();
         ctx.fillStyle = "rgba(245, 165, 36, 0.85)";
-        ctx.fillText(d >= 1 ? String(d) : d.toExponential(0), size.width - M.right + 4, yF(d));
+        ctx.fillText(decadeLabel(axis.ticks[i]!), size.width - M.right + 4, yF(d));
       }
       // energy ticks (left)
       ctx.textAlign = "right";

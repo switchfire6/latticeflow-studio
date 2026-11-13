@@ -15,6 +15,10 @@ Error mapping (body is always ``ErrorResponse``, ``code`` an ``ErrorCode`` value
 * 502 ``HULL_UNAVAILABLE``      MP query failed / unreachable, or MP has no usable
   elemental reference phase for an element (the upstream data cannot build a hull)
 * 500 ``COMPUTE_FAILED``        any other exception (logged with traceback)
+* Phase B: 422 ``MODEL_UNAVAILABLE`` (hull ``model_id`` / ``dispersion`` cannot be loaded);
+  ``/api/mp/*``: 503 ``MP_UNAVAILABLE`` (no key), 502 ``MP_UNAVAILABLE`` (upstream failure),
+  404 ``MP_NOT_FOUND``, 422 ``INVALID_PAYLOAD`` (unparsable query / id); ``/api/diffraction``:
+  422 ``INVALID_PAYLOAD`` for an empty 2theta range or unknown radiation.
 
 The handlers are HTTP-only: ``RequestValidationError`` never arises on the
 WebSocket route (that is ``WebSocketRequestValidationError``), ``ApiError`` is
@@ -27,7 +31,8 @@ Test seams
 ----------
 ``hull_context`` is a FastAPI dependency returning the MP key, fetcher and cache
 used by ``/api/hull/evaluate`` (and the key for ``/api/health``); tests override
-it via ``app.dependency_overrides[routes.hull_context]``.
+it via ``app.dependency_overrides[routes.hull_context]``. ``mp_context`` does the same for
+``/api/mp/*`` (key plus an optional injected ``MPClient``).
 """
 
 from __future__ import annotations
@@ -45,7 +50,7 @@ from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse, Response
 
 from app.config import get_settings
-from app.core import hull_analyzer
+from app.core import diffraction, hull_analyzer, mp_client
 from app.core.structure_io import (
     StructureIOError,
     atoms_from_cif,
@@ -58,12 +63,17 @@ from app.core.structure_io import (
 from app.core.umlip_engine import UMLIPEngine, reduced_formula
 from app.presets import PresetInfo, list_presets
 from app.schemas.api import (
+    DiffractionRequest,
+    DiffractionResponse,
     ErrorResponse,
     ExportRequest,
     HealthResponse,
     HullEvaluateRequest,
     HullEvaluateResponse,
     ImportCifRequest,
+    ModelListResponse,
+    MPSearchResponse,
+    MPStructureResponse,
 )
 from app.schemas.crystal import CrystalStatePayload
 from app.schemas.messages import ErrorCode
@@ -77,6 +87,7 @@ _ERROR_RESPONSES = {
     500: {"model": ErrorResponse},
 }
 _HULL_RESPONSES = {**_ERROR_RESPONSES, 502: {"model": ErrorResponse}, 503: {"model": ErrorResponse}}
+_MP_RESPONSES = {**_HULL_RESPONSES, 404: {"model": ErrorResponse}}
 
 
 # --------------------------------------------------------------------------
@@ -164,6 +175,16 @@ class HullContext:
 
 def hull_context() -> HullContext:
     return HullContext(api_key=get_settings().mp_api_key)
+
+
+@dataclass
+class MPContext:
+    api_key: Optional[str]
+    client: Optional[mp_client.MPClient] = None   # None = mp_client.MaterialsProjectClient(api_key)
+
+
+def mp_context() -> MPContext:
+    return MPContext(api_key=get_settings().mp_api_key)
 
 
 # --------------------------------------------------------------------------
@@ -261,10 +282,11 @@ def import_cif(req: ImportCifRequest) -> CrystalStatePayload:
 @router.post("/hull/evaluate", response_model=HullEvaluateResponse, responses=_HULL_RESPONSES)
 def hull_evaluate(req: HullEvaluateRequest, ctx: HullContext = Depends(hull_context)) -> HullEvaluateResponse:
     atoms = _payload_atoms(req.crystal)  # 422 on invalid structures
+    engine = _engine_for(req.model_id, req.dispersion)
     try:
         return hull_analyzer.evaluate_hull(
             atoms,
-            engine=UMLIPEngine.get_instance(),
+            engine=engine,
             api_key=ctx.api_key,
             fetcher=ctx.fetcher,
             cache=ctx.cache,
@@ -279,3 +301,94 @@ def hull_evaluate(req: HullEvaluateRequest, ctx: HullContext = Depends(hull_cont
         raise ApiError(502, ErrorCode.HULL_UNAVAILABLE, str(exc)) from exc
     except Exception as exc:  # noqa: BLE001
         raise _compute_failed("hull evaluation", exc) from exc
+
+
+def _engine_for(model_id: Optional[str], dispersion: bool) -> UMLIPEngine:
+    """Process default engine, or BW's model registry (422 MODEL_UNAVAILABLE if it cannot load)."""
+    if model_id is None and not dispersion:
+        return UMLIPEngine.get_instance()
+    from app.core import umlip_engine
+
+    try:
+        return umlip_engine.get_engine(model_id, bool(dispersion))
+    except umlip_engine.ModelUnavailableError as exc:
+        raise ApiError(422, ErrorCode.MODEL_UNAVAILABLE, str(exc)) from exc
+
+
+@router.get("/models", response_model=ModelListResponse, responses=_ERROR_RESPONSES)
+def models() -> ModelListResponse:
+    from app.core import umlip_engine
+
+    return ModelListResponse(models=umlip_engine.list_models(), default_model_id=umlip_engine.default_model_id())
+
+
+@router.post("/diffraction", response_model=DiffractionResponse, responses=_ERROR_RESPONSES)
+def diffraction_pattern(req: DiffractionRequest) -> DiffractionResponse:
+    """Powder XRD / neutron pattern (``core.diffraction``); 422 INVALID_PAYLOAD for a bad range / radiation."""
+    atoms = _payload_atoms(req.crystal)
+    try:
+        return diffraction.compute_pattern(
+            atoms,
+            kind=req.kind,
+            radiation=req.radiation,
+            wavelength_angstrom=req.wavelength_angstrom,
+            two_theta_min=req.two_theta_min,
+            two_theta_max=req.two_theta_max,
+        )
+    except diffraction.DiffractionError as exc:
+        raise ApiError(422, ErrorCode.INVALID_PAYLOAD, str(exc)) from exc
+    except Exception as exc:  # noqa: BLE001
+        raise _compute_failed("diffraction", exc) from exc
+
+
+def _mp(ctx: MPContext) -> mp_client.MPClient:
+    if ctx.client is not None:
+        return ctx.client
+    try:
+        return mp_client.MaterialsProjectClient(ctx.api_key)
+    except mp_client.MPNoApiKeyError as exc:
+        raise ApiError(503, ErrorCode.MP_UNAVAILABLE, str(exc)) from exc
+
+
+def _mp_call(fn):
+    try:
+        return fn()
+    except mp_client.MPNoApiKeyError as exc:
+        raise ApiError(503, ErrorCode.MP_UNAVAILABLE, str(exc)) from exc
+    except mp_client.MPQueryError as exc:
+        raise ApiError(422, ErrorCode.INVALID_PAYLOAD, str(exc)) from exc
+    except mp_client.MPNotFoundError as exc:
+        raise ApiError(404, ErrorCode.MP_NOT_FOUND, str(exc)) from exc
+    except mp_client.MPFetchError as exc:
+        log.warning("Materials Project request failed: %s", exc)
+        raise ApiError(502, ErrorCode.MP_UNAVAILABLE, str(exc)) from exc
+
+
+@router.get("/mp/search", response_model=MPSearchResponse, responses=_MP_RESPONSES)
+def mp_search(q: str, ctx: MPContext = Depends(mp_context)) -> MPSearchResponse:
+    """Search MP by formula ("SrTiO3"), chemical system ("Li-Fe-O") or id ("mp-5229")."""
+    try:
+        mp_client.parse_query(q)   # 422 before touching the key / network
+    except mp_client.MPQueryError as exc:
+        raise ApiError(422, ErrorCode.INVALID_PAYLOAD, str(exc)) from exc
+    client = _mp(ctx)
+    results = _mp_call(lambda: client.search(q))
+    return MPSearchResponse(query=q, results=mp_client.sort_entries(list(results)))
+
+
+@router.get("/mp/structure/{material_id}", response_model=MPStructureResponse, responses=_MP_RESPONSES)
+def mp_structure(material_id: str, ctx: MPContext = Depends(mp_context)) -> MPStructureResponse:
+    """MP structure as a symmetrised CIF of its conventional standard cell (<= 64 atoms, else MP's cell)."""
+    try:
+        mid = mp_client.normalize_material_id(material_id)
+    except mp_client.MPQueryError as exc:
+        raise ApiError(422, ErrorCode.INVALID_PAYLOAD, str(exc)) from exc
+    client = _mp(ctx)
+    entry, structure = _mp_call(lambda: client.get_structure(mid))
+    try:
+        cif = mp_client.structure_cif(structure)
+    except mp_client.MPFetchError as exc:
+        raise ApiError(502, ErrorCode.MP_UNAVAILABLE, str(exc)) from exc
+    except Exception as exc:  # noqa: BLE001
+        raise _compute_failed("CIF conversion", exc) from exc
+    return MPStructureResponse(entry=entry, cif=cif)
