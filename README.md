@@ -1,5 +1,7 @@
 # LatticeFlow Studio
 
+[![CI](https://github.com/switchfire6/latticeflow-studio/actions/workflows/ci.yml/badge.svg)](https://github.com/switchfire6/latticeflow-studio/actions/workflows/ci.yml) [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+
 An interactive crystal and phonon studio for materials scientists. Load, generate or edit a crystal and watch the forces of a universal machine-learned interatomic potential (MACE) update live in 3D. Then answer the usual questions in seconds to minutes, on a laptop GPU or a CPU: is it relaxed, is it dynamically stable, is it mechanically stable, is it on the hull?
 
 ![Cubic SrTiO3 is relaxed, its phonons show an imaginary mode at R, and following that mode leads to the tilted I4/mcm phase](docs/media/demo.gif)
@@ -41,6 +43,10 @@ Every committed change goes into the undo/redo history (50 entries), and the ses
 | Phonons of relaxed cubic SrTiO₃ | After following the R-point mode |
 |---|---|
 | ![Phonon dispersion with imaginary modes at Γ and R](docs/media/phonons.png) | ![The relaxed I4/mcm phase with tilted TiO6 octahedra](docs/media/tilted-phase.png) |
+
+![The project library with structure lineage, a finished relax → phonons → elastic → hull batch in the job queue, and the project results table](docs/media/library.png)
+
+*A batch of SrTiO₃, BaTiO₃ and Si queued from Python (`submit_jobs`) and run unattended: each relaxed child sits under its parent in the library, and the results table collects E_hull, phonon and elastic summaries.*
 
 ## Quick start
 
