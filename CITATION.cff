@@ -1,0 +1,24 @@
+cff-version: 1.2.0
+message: >-
+  If you use LatticeFlow Studio in your work, please cite it as below, and cite
+  the methods it builds on (MACE, phonopy, spglib, ASE, pymatgen, the Materials
+  Project); see the Acknowledgements section of the README.
+title: LatticeFlow Studio
+abstract: >-
+  An interactive crystal and phonon studio: live forces from universal
+  machine-learned interatomic potentials (MACE), relaxation, phonons, elastic
+  tensors, convex hulls, a project library and a job queue, in the browser and
+  from Python.
+type: software
+authors:
+  - alias: switchfire6
+repository-code: "https://github.com/switchfire6/latticeflow-studio"
+license: MIT
+version: 0.5.0
+date-released: "2026-11-13"
+keywords:
+  - materials science
+  - phonons
+  - machine-learning interatomic potentials
+  - MACE
+  - crystal structure
