@@ -5,7 +5,7 @@
  */
 import { create } from "zustand";
 import type { Snapshot } from "../services/snapshotCache";
-import type { ArrheniusPoint, HistoryRef } from "../utils/analysisC";
+import type { ArrheniusPoint, HistoryRef } from "../utils/analysis";
 import type { Vec3 } from "../utils/latticeMath";
 
 export type DialogKind = "supercell" | "add-atom" | "substitution" | "formation" | "committee" | "ordering" | "compare" | "prototype";

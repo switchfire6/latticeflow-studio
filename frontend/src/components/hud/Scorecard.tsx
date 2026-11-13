@@ -15,7 +15,7 @@ import { commands } from "../../services/wsClient";
 import { badgeCriteria, useSettings } from "../../store/settings";
 import { useCrystalStore } from "../../store/useCrystalStore";
 import { useUi } from "../../store/uiStore";
-import { committeeVerdict } from "../../utils/analysisC";
+import { committeeVerdict } from "../../utils/analysis";
 import { computeScorecard, scorecardSummary, type CheckId, type CheckState, type ScoreCheck } from "../../utils/scorecard";
 import { Panel, cx } from "./ui";
 

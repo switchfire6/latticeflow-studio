@@ -21,7 +21,7 @@ from app.presets import load_preset
 from app.schemas.api import MPEntry
 from app.schemas.messages import GenerationCandidates, PrototypeCandidates, PrototypeSearchPayload
 
-from test_phase_b_session import (  # noqa: F401 - fixtures are used by name
+from test_session_models import (  # noqa: F401 - fixtures are used by name
     _clean_registry,
     _types,
     _without_progress,

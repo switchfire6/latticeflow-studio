@@ -137,7 +137,7 @@ class Studio:
     """Thin protocol driver around a TestClient websocket session.
 
     ``HISTORY_STATE`` events (undo history, Phase A) are skipped unless
-    ``skip_history`` is False; they are covered by ``test_phase_a_session.py``.
+    ``skip_history`` is False; they are covered by ``test_session_relax.py``.
     """
 
     skip_history = True

@@ -1,7 +1,7 @@
 /**
  * Phase C2 click-to-place (§7.3): while the Add-atom dialog is in "pick in
  * viewport" mode, a translucent plane s_axis = depth spans the cell face and
- * the pointer ray is intersected with it analytically (utils/analysisC2.ts
+ * the pointer ray is intersected with it analytically (utils/ionics.ts
  * rayCellPlaneFrac, so atoms in front never block the pick). A ghost atom
  * previews the hit; a click (no drag) commits the fractional coordinates
  * and reopens the dialog. The tool mode is VIEW while picking (no atom drags).
@@ -11,7 +11,7 @@ import { useEffect, useMemo, useRef } from "react";
 import * as THREE from "three";
 import { useCrystalStore, type ToolMode } from "../../store/useCrystalStore";
 import { useUi } from "../../store/uiStore";
-import { rayCellPlaneFrac } from "../../utils/analysisC2";
+import { rayCellPlaneFrac } from "../../utils/ionics";
 import { cpkHex, elementBySymbol } from "../../utils/cpkColors";
 import type { Vec3 } from "../../utils/latticeMath";
 import { commitPlacement } from "../../services/placementActions";

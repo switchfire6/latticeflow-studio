@@ -21,7 +21,7 @@ from app.core.structure_io import atoms_to_poscar
 from app.core.umlip_engine import ModelUnavailableError, UMLIPEngine, get_engine
 from app.presets import load_preset
 
-from test_phase_a_session import _hstudio  # noqa: F401
+from test_session_relax import _hstudio  # noqa: F401
 from test_ws_protocol import (  # noqa: F401 - fixtures are used by name
     _hang_guard,
     _wait_no_job_threads,

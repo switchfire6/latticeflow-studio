@@ -24,7 +24,7 @@ import {
   type RelaxationCriteria,
 } from "../../utils/structureInfo";
 import { formatPressure, type PressureUnit } from "../../utils/units";
-import { MpMatchSection } from "./PhaseC2Dialogs";
+import { MpMatchSection } from "./DiscoveryDialogs";
 import { RelaxationBadge } from "./TelemetryHeader";
 import { Button, CollapsibleCard, FallbackTag, cx } from "./ui";
 

@@ -50,7 +50,7 @@ import { registerDefaultSend } from "./phononActions";
 import { SessionMemory } from "./sessionMemory";
 import { snapshots } from "./snapshotCache";
 import { studioLimits, type StudioLimits } from "../utils/limits";
-import { historySteps } from "../utils/analysisC";
+import { historySteps } from "../utils/analysis";
 import { downloadText } from "../utils/download";
 
 import { pickDefaultEigenmode } from "../utils/phonon";

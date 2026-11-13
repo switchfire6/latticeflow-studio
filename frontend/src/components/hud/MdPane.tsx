@@ -16,8 +16,8 @@ import { DEFAULT_MD, abortArrheniusScan, mdPayload, startArrheniusScan, type MdS
 import { commands } from "../../services/wsClient";
 import { useCrystalStore, type MdSeries } from "../../store/useCrystalStore";
 import { scanPoints, useUi } from "../../store/uiStore";
-import { arrheniusFit, parseTemperatures, sciText } from "../../utils/analysisC";
-import { chargeText, elementCountMap, ionicConductivities, oxidationStatesFromSites, type ConductivityRow } from "../../utils/analysisC2";
+import { arrheniusFit, parseTemperatures, sciText } from "../../utils/analysis";
+import { chargeText, elementCountMap, ionicConductivities, oxidationStatesFromSites, type ConductivityRow } from "../../utils/ionics";
 import { LineChart, type LineSeries } from "../charts/LineChart";
 import { SERIES_COLORS } from "../../utils/chartData";
 import { Button, FallbackTag, NumberField, Segmented, cx, inputCls } from "./ui";

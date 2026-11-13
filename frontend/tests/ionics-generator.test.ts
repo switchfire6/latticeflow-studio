@@ -9,7 +9,7 @@ import { SnapshotCache, historyKey } from "../src/services/snapshotCache";
 import { StudioClient, type WebSocketLike } from "../src/services/wsClient";
 import { createCrystalStore } from "../src/store/useCrystalStore";
 import type { ClientCommand, CrystalStatePayload, GenerationCandidates, HistoryEntryInfo, HistoryState, PrototypeCandidates, ServerMessage } from "../src/types/protocol";
-import { ionicConductivities, nernstEinsteinSigma, oxidationStatesFromSites, rayCellPlaneFrac, searchSummaryText, substitutionText } from "../src/utils/analysisC2";
+import { ionicConductivities, nernstEinsteinSigma, oxidationStatesFromSites, rayCellPlaneFrac, searchSummaryText, substitutionText } from "../src/utils/ionics";
 import { flattenMatrix, invert3 } from "../src/utils/latticeMath";
 import { error, flowFinal, makeCrystal, makePhonon, phononDone, spu, stopped } from "./fixtures";
 

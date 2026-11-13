@@ -8,7 +8,7 @@ import { History, Pin } from "lucide-react";
 import { commands } from "../../services/wsClient";
 import { useCrystalStore } from "../../store/useCrystalStore";
 import { useUi } from "../../store/uiStore";
-import { resolveHistoryRef } from "../../utils/analysisC";
+import { resolveHistoryRef } from "../../utils/analysis";
 import { CollapsibleCard, FormulaText, cx } from "./ui";
 
 export function HistoryPanel() {

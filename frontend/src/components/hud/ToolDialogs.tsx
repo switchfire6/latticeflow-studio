@@ -21,7 +21,7 @@ import { useCrystalStore } from "../../store/useCrystalStore";
 import { cancelPlacement, startPlacement } from "../../services/placementActions";
 import { useUi, type DialogKind } from "../../store/uiStore";
 import type { OrderingResponse } from "../../types/protocol";
-import { committeeVerdict, resolveHistoryRef } from "../../utils/analysisC";
+import { committeeVerdict, resolveHistoryRef } from "../../utils/analysis";
 import { cpkHex, elementBySymbol, normalizeSymbol } from "../../utils/cpkColors";
 import { flattenMatrix, invert3, minimumImageCart, type Vec3 } from "../../utils/latticeMath";
 import { studioLimits } from "../../utils/limits";
@@ -794,7 +794,7 @@ const DIALOGS: Partial<Record<DialogKind, () => ReactNode>> = {
   ordering: () => <OrderingDialog />,
 };
 
-export function PhaseCDialogs() {
+export function ToolDialogs() {
   const dialog = useUi((s) => s.dialog);
   const render = dialog ? DIALOGS[dialog] : undefined;
   return render ? <>{render()}</> : null;

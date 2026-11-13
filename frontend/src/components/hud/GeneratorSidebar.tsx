@@ -26,8 +26,8 @@ import { StructureActions } from "./StructureActions";
 import { StructurePanel } from "./StructurePanel";
 import { HistoryPanel } from "./HistoryPanel";
 import { LibraryPanel } from "./LibraryPanel";
-import { DefectsCard } from "./PhaseCDialogs";
-import { GenerationCandidatesList } from "./PhaseC2Dialogs";
+import { DefectsCard } from "./ToolDialogs";
+import { GenerationCandidatesList } from "./DiscoveryDialogs";
 import { useUi } from "../../store/uiStore";
 import { Button, CollapsibleCard, FormulaText, Slider, Toggle, cx, inputCls } from "./ui";
 

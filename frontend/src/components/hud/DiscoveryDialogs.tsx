@@ -23,12 +23,12 @@ import { commands } from "../../services/wsClient";
 import { useCrystalStore } from "../../store/useCrystalStore";
 import { useUi } from "../../store/uiStore";
 import type { CompareResponse, CrystalStatePayload, MPMatchResponse } from "../../types/protocol";
-import { searchSummaryText, substitutionText } from "../../utils/analysisC2";
+import { searchSummaryText, substitutionText } from "../../utils/ionics";
 import { parseFormula } from "../../utils/formula";
 import { sameStructure } from "../../utils/structureInfo";
 import { LineChart, type LineSeries } from "../charts/LineChart";
 import { ProgressBar } from "./ElasticPane";
-import { Modal, Warn } from "./PhaseCDialogs";
+import { Modal, Warn } from "./ToolDialogs";
 import { Button, FormulaText, Segmented, Toggle, cx, inputCls } from "./ui";
 
 const close = () => useUi.getState().closeDialog();
@@ -529,7 +529,7 @@ export function PrototypeDialog() {
   );
 }
 
-export function PhaseC2Dialogs() {
+export function DiscoveryDialogs() {
   const dialog = useUi((s) => s.dialog);
   if (dialog === "compare") return <CompareDialog />;
   if (dialog === "prototype") return <PrototypeDialog />;

@@ -8,7 +8,7 @@ import { StudioClient, type WebSocketLike } from "../src/services/wsClient";
 import { SessionMemory } from "../src/services/sessionMemory";
 import { createCrystalStore } from "../src/store/useCrystalStore";
 import type { ClientCommand, CommitteeResult, LocalAnalysisData, MDFrame, ServerMessage } from "../src/types/protocol";
-import { arrheniusFit, committeeVerdict, historySteps, K_B_EV, resolveHistoryRef, sciText } from "../src/utils/analysisC";
+import { arrheniusFit, committeeVerdict, historySteps, K_B_EV, resolveHistoryRef, sciText } from "../src/utils/analysis";
 import { alignIdeals, bondValenceDeviation, convexHullFaces, glazerDisplay, idealLengthMap } from "../src/utils/localStructure";
 import { diagonalMatrix, previewSupercell, shortestPeriodicDistance, substitutionCount, SUPERCELL_PRESETS, suggestDiagonal } from "../src/utils/supercell";
 import { error, makeCrystal, spu, stopped } from "./fixtures";

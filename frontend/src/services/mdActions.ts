@@ -8,7 +8,7 @@
 import type { StartMDPayload } from "../types/protocol";
 import { useCrystalStore } from "../store/useCrystalStore";
 import { useUi, type ArrheniusScan } from "../store/uiStore";
-import { historySteps } from "../utils/analysisC";
+import { historySteps } from "../utils/analysis";
 import { commands, studio } from "./wsClient";
 
 export interface MdSettings {
