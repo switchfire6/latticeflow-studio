@@ -5,7 +5,7 @@
 // (start.sh), and the studio opens in a browser tab when port 5173 is forwarded.
 {
   "name": "LatticeFlow Studio",
-  "image": "mcr.microsoft.com/devcontainers/python:1-3.11-bookworm",
+  "build": { "dockerfile": "Dockerfile" },
   "features": {
     "ghcr.io/devcontainers/features/node:1": { "version": "24" },
     "ghcr.io/devcontainers/features/sshd:1": {}
