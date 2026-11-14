@@ -16,6 +16,9 @@ MODE="${1:-preview}"
 BACKEND_PAT="uvicorn app.main:app"
 FRONTEND_PAT="vite.*--port 5173"
 running() { pgrep -f "$1" >/dev/null 2>&1; }
+# Codespaces tears down postStartCommand's processes when it exits, so don't exit
+# until each server has exec'd (by then setsid has moved it to its own session).
+wait_for() { for _ in $(seq 1 100); do running "$1" && return 0; sleep 0.1; done; echo "WARNING: $2 did not start; see its log." >&2; }
 
 if [ "$MODE" = "restart" ]; then
   pkill -f "$BACKEND_PAT" 2>/dev/null || true
@@ -36,6 +39,7 @@ else
   cd "$ROOT/backend"
   setsid nohup "$VENV/bin/uvicorn" app.main:app --host 127.0.0.1 --port 8000 \
     >/tmp/latticeflow-backend.log 2>&1 < /dev/null &
+  wait_for "$BACKEND_PAT" backend
 fi
 
 if running "$FRONTEND_PAT"; then
@@ -50,6 +54,7 @@ else
   fi
   echo "Starting studio on :5173 ($MODE; log: /tmp/latticeflow-frontend.log)"
   setsid nohup "${CMD[@]}" >/tmp/latticeflow-frontend.log 2>&1 < /dev/null &
+  wait_for "$FRONTEND_PAT" studio
 fi
 
 echo "The backend loads MACE and runs a warm-up before accepting connections (up to a minute on first start)."
