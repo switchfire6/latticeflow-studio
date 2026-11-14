@@ -43,10 +43,10 @@ if running "$FRONTEND_PAT"; then
 else
   cd "$ROOT/frontend"
   if [ "$MODE" = "dev" ]; then
-    CMD=(npx vite --host 127.0.0.1 --port 5173 --strictPort)
+    CMD=(node_modules/.bin/vite --host 127.0.0.1 --port 5173 --strictPort)
   else
     [ -f dist/index.html ] || npm run build
-    CMD=(npx vite preview --host 127.0.0.1 --port 5173 --strictPort)
+    CMD=(node_modules/.bin/vite preview --host 127.0.0.1 --port 5173 --strictPort)
   fi
   echo "Starting studio on :5173 ($MODE; log: /tmp/latticeflow-frontend.log)"
   setsid nohup "${CMD[@]}" >/tmp/latticeflow-frontend.log 2>&1 < /dev/null &
