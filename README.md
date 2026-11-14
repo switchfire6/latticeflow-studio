@@ -1,6 +1,6 @@
 # LatticeFlow Studio
 
-[![CI](https://github.com/switchfire6/latticeflow-studio/actions/workflows/ci.yml/badge.svg)](https://github.com/switchfire6/latticeflow-studio/actions/workflows/ci.yml) [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+[![CI](https://github.com/switchfire6/latticeflow-studio/actions/workflows/ci.yml/badge.svg)](https://github.com/switchfire6/latticeflow-studio/actions/workflows/ci.yml) [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE) [![Open in GitHub Codespaces](https://github.com/codespaces/badge.svg)](https://codespaces.new/switchfire6/latticeflow-studio?quickstart=1)
 
 An interactive crystal and phonon studio for materials scientists. Load, generate or edit a crystal and watch the forces of a universal machine-learned interatomic potential (MACE) update live in 3D. Then answer the usual questions in seconds to minutes, on a laptop GPU or a CPU: is it relaxed, is it dynamically stable, is it mechanically stable, is it on the hull?
 
@@ -52,6 +52,8 @@ Every committed change goes into the undo/redo history (50 entries), and the ses
 ## Quick start
 
 You need Python 3.11 and Node 22.12 or newer. A CUDA GPU is optional; small cells run fine on a CPU.
+
+**Try it without installing anything.** Click *Open in GitHub Codespaces* above. GitHub builds a cloud dev environment, installs everything (CPU torch, the backend, the frontend and the MACE-MP-0 small checkpoint), starts both servers and opens the studio in a new tab. The first build takes several minutes; later starts take under a minute. It runs on your own free Codespaces hours, on CPU, so it suits the presets and small cells. The forwarded ports are private to your GitHub account; keep them that way. See [`.devcontainer/README.md`](.devcontainer/README.md) for the Materials Project key, logs and restarting.
 
 **1. Backend**, from `backend/`:
 

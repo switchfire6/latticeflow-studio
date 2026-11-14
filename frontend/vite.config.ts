@@ -10,10 +10,14 @@ import tailwindcss from "@tailwindcss/vite";
 export default defineConfig(({ mode }) => {
   const env = loadEnv(mode, process.cwd(), "");
   const target = (env.VITE_BACKEND_URL || "http://127.0.0.1:8000").replace(/\/+$/, "");
+  // GitHub Codespaces serves forwarded ports as https://<name>-<port>.app.github.dev;
+  // Vite rejects unknown Host headers unless they are listed.
+  const allowedHosts = process.env.CODESPACES === "true" ? [".app.github.dev"] : undefined;
   return {
     plugins: [react(), tailwindcss()],
     server: {
       port: 5173,
+      allowedHosts,
       proxy: {
         "/api": { target, changeOrigin: true },
         "/ws": { target, ws: true, changeOrigin: true },
@@ -21,6 +25,7 @@ export default defineConfig(({ mode }) => {
     },
     preview: {
       port: 4173,
+      allowedHosts,
       proxy: {
         "/api": { target, changeOrigin: true },
         "/ws": { target, ws: true, changeOrigin: true },
