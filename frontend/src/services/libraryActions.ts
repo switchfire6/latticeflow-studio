@@ -45,6 +45,7 @@ export const KIND_LABEL: Record<ResultKind, string> = {
   hull: "E_hull",
   md: "MD",
   diffraction: "diffraction",
+  superconductivity: "SC proxies",
 };
 
 export function errorText(e: unknown): string {
@@ -450,6 +451,7 @@ export function collectMethodsInput(): MethodsInput {
       range: typeof lo === "number" && typeof hi === "number" ? [lo, hi] : null,
     };
   }
+  if (st.phonon && st.dos?.eph_proxy) input.superconductivity = { mesh: st.dos.mesh };
   return input;
 }
 

@@ -49,7 +49,7 @@ from app.schemas.messages import (
 
 log = logging.getLogger("latticeflow.jobs")
 
-STEP_KINDS = ("relax", "phonons", "elastic", "eos", "hull", "follow")
+STEP_KINDS = ("relax", "phonons", "elastic", "eos", "hull", "follow", "superconductivity")
 #: Progress / message writes to the database are throttled to one per this many seconds.
 PROGRESS_INTERVAL_S = 0.5
 PAUSED_MESSAGE = "paused: an interactive session is computing"
@@ -63,6 +63,11 @@ class FollowStepSettings(BaseModel):
     amplitude: float = Field(default=0.1, gt=0)            # the UI's FOLLOW_INSTABILITY defaults
     fmax: float = Field(default=0.005, gt=0)
     max_steps: int = Field(default=300, ge=1, le=2000)
+
+
+class SuperconductivityStepSettings(BaseModel):
+    mesh: Optional[List[int]] = Field(default=None, min_length=3, max_length=3)   # None = automatic DOS mesh
+    use_mp: bool = True                    # Materials Project gap for the metallicity gate (heuristic otherwise)
 
 
 def normalize_settings(kind: str, settings: Optional[Dict[str, Any]]) -> Dict[str, Any]:
@@ -84,6 +89,10 @@ def normalize_settings(kind: str, settings: Optional[Dict[str, Any]]) -> Dict[st
             model = HullStepSettings(**s)
         elif kind == "follow":
             model = FollowStepSettings(**s)
+        elif kind == "superconductivity":
+            model = SuperconductivityStepSettings(**s)
+            if model.mesh is not None and any(int(n) < 1 for n in model.mesh):
+                raise LibraryError("superconductivity settings: mesh: must be three positive integers")
         else:
             raise LibraryError(f"unknown step kind {kind!r}; one of {', '.join(STEP_KINDS)}")
     except ValidationError as exc:
@@ -110,6 +119,7 @@ class HullJobContext:
     api_key: Optional[str]
     fetcher: Any = None
     cache: Any = None
+    mp_client: Any = None          # superconductivity step: injected MPClient (None = from api_key)
 
 
 def _default_engine(model_id: Optional[str], dispersion: bool):
@@ -212,8 +222,8 @@ class JobQueue:
             settings = normalize_settings(kind, step.get("settings"))
             if step.get("only_if_unstable") and kind != "follow":
                 raise LibraryError(f"steps[{i}]: only_if_unstable applies to follow steps only")
-            if kind == "follow" and not phonons_ready:
-                raise LibraryError(f"steps[{i}]: follow needs a phonons step before it (with no relax / follow "
+            if kind in ("follow", "superconductivity") and not phonons_ready:
+                raise LibraryError(f"steps[{i}]: {kind} needs a phonons step before it (with no relax / follow "
                                    "in between)")
             if kind == "phonons":
                 phonons_ready = True
@@ -493,6 +503,18 @@ class JobQueue:
         return {"result_id": rid, "message": "stable" if r.is_dynamically_stable
                 else f"unstable (min {r.min_frequency_thz:.2f} THz)"}
 
+    def _chain_analysis(self, ctx: "_StepContext"):
+        """The chain's cached ``PhononAnalysis`` of this structure, else a rerun of its last phonons settings."""
+        job = ctx.job
+        cached = self._analyses.get(job["chain_id"])
+        if cached is not None and cached[0] == ctx.structure["id"]:
+            return cached[1]
+        # e.g. after a restart: rerun the chain's last phonons step settings
+        prior = [j for j in self.library.chain_jobs(job["chain_id"])
+                 if j["kind"] == "phonons" and j["step_index"] < job["step_index"]]
+        settings = prior[-1]["settings"] if prior else normalize_settings("phonons", {})
+        return self._run_phonons(ctx, settings)
+
     def _step_follow(self, ctx: "_StepContext") -> Dict[str, Any]:
         import numpy as np
 
@@ -500,14 +522,7 @@ class JobQueue:
         from app.core.structure_io import max_atoms
 
         job = ctx.job
-        cached = self._analyses.get(job["chain_id"])
-        if cached is not None and cached[0] == ctx.structure["id"]:
-            analysis = cached[1]
-        else:  # e.g. after a restart: rerun the chain's last phonons step settings
-            prior = [j for j in self.library.chain_jobs(job["chain_id"])
-                     if j["kind"] == "phonons" and j["step_index"] < job["step_index"]]
-            settings = prior[-1]["settings"] if prior else normalize_settings("phonons", {})
-            analysis = self._run_phonons(ctx, settings)
+        analysis = self._chain_analysis(ctx)
         r = analysis.result
         if r.is_dynamically_stable:
             if job["only_if_unstable"]:
@@ -541,6 +556,48 @@ class JobQueue:
         rid = self._save_result(ctx, child["id"], "relax", final, settings)
         return {"result_id": rid, "output_structure_id": child["id"],
                 "message": f"{label}: {final.crystal.spacegroup_symbol}"}
+
+    def _step_superconductivity(self, ctx: "_StepContext") -> Dict[str, Any]:
+        """Tier 0 proxies (DOS descriptors, assumed-λ Allen–Dynes grid) plus the metallicity gate."""
+        from app.core import phonon_engine
+        from app.core import superconductivity as sc
+        from app.schemas.api import MetallicityResponse, SuperconductivityResult
+
+        analysis = self._chain_analysis(ctx)
+        self._analyses[ctx.job["chain_id"]] = (ctx.structure["id"], analysis)   # a later follow reuses it
+        s = ctx.settings
+        try:
+            dos = analysis.dos_and_thermal(mesh=s["mesh"], should_cancel=ctx.check)
+        except phonon_engine.PhononCancelled:
+            raise JobCancelled() from None
+        except ValueError as exc:
+            raise StepFailed(f"INVALID_OPERATION: {exc}") from None
+        desc = dos.eph_proxy or sc.descriptors_from_dos(dos)
+        if ctx.check():
+            raise JobCancelled()
+        try:  # MP errors never fail the step
+            client, why = None, None
+            if s["use_mp"]:
+                hc = self.hull_context()
+                client = hc.mp_client
+                if client is None:
+                    client, why = sc.mp_client_or_reason(hc.api_key)
+            met = sc.assess_metallicity(ctx.atoms, client, s["use_mp"], unavailable_reason=why)
+        except Exception as exc:  # noqa: BLE001
+            log.warning("superconductivity step: metallicity gate failed: %s", exc)
+            met = MetallicityResponse(verdict="unknown", source="heuristic",
+                                      reason=f"metallicity check failed ({type(exc).__name__})")
+        r = analysis.result
+        flags = sc.sc_flags(desc, met.verdict, dynamically_stable=r.is_dynamically_stable,
+                            band_frequencies_thz=analysis.frequencies, band_qpoints=analysis.path.qpoints,
+                            labelled_indices=list(analysis.path.point_names))
+        data = SuperconductivityResult(descriptors=desc, metallicity=met, flags=flags, dos_mesh=list(dos.mesh),
+                                       imaginary_fraction=dos.imaginary_fraction)
+        rid = self._save_result(ctx, ctx.structure["id"], "superconductivity", data)
+        w_log = f"ω_log {desc.omega_log_k:.0f} K" if desc.omega_log_k is not None else "ω_log n/a"
+        tc = f"T_c,ref {desc.tc_ref_k:.1f} K" if desc.tc_ref_k is not None else "T_c,ref n/a (not reliable)"
+        src = "MP" if met.source == "materials_project" else "heuristic"
+        return {"result_id": rid, "message": f"{w_log} · {tc} · {met.verdict} ({src})"}
 
     def _step_elastic(self, ctx: "_StepContext") -> Dict[str, Any]:
         import numpy as np

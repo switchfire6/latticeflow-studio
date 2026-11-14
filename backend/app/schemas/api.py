@@ -9,6 +9,7 @@ from typing import Dict, List, Literal, Optional
 from pydantic import BaseModel, Field
 
 from app.schemas.crystal import CrystalStatePayload
+from app.schemas.messages import EphProxyDescriptors
 
 
 class HealthResponse(BaseModel):
@@ -162,6 +163,9 @@ class MPEntry(BaseModel):
     energy_above_hull: Optional[float]  # MP DFT value, eV/atom
     is_stable: Optional[bool]
     theoretical: Optional[bool]
+    # ---- superconductivity Tier 0 (additive): MP's GGA/GGA+U electronic data
+    band_gap: Optional[float] = None    # eV
+    is_metal: Optional[bool] = None
 
 
 class MPSearchResponse(BaseModel):
@@ -250,3 +254,35 @@ class MPMatchResponse(BaseModel):
     formula: str
     n_searched: int                          # MP entries of the same reduced formula
     matches: List[MPMatch]                   # sorted by rms
+
+
+# --------------------------------------------------------------------------- #
+# Superconductivity Tier 0 (docs/design/SUPERCONDUCTIVITY_TIER0.md): metallicity gate
+# --------------------------------------------------------------------------- #
+MetallicityVerdict = Literal["metal", "likely_metal", "likely_insulator", "insulator", "unknown"]
+
+
+class MetallicityRequest(BaseModel):
+    """POST /api/superconductivity/metallicity (works without an MP key: composition heuristic)."""
+
+    crystal: CrystalStatePayload
+    use_mp: bool = True
+
+
+class MetallicityResponse(BaseModel):
+    verdict: MetallicityVerdict
+    source: Literal["materials_project", "heuristic"]
+    band_gap_ev: Optional[float] = None      # MP (GGA/GGA+U) gap of the best StructureMatcher match
+    mp_id: Optional[str] = None
+    rms_displacement: Optional[float] = None
+    reason: str                              # one sentence shown to the user
+
+
+class SuperconductivityResult(BaseModel):
+    """``data`` of a saved ``superconductivity`` result (job step ``superconductivity``)."""
+
+    descriptors: EphProxyDescriptors
+    metallicity: MetallicityResponse
+    flags: List[str]                         # light_elements, high_omega_log, soft_mode, unstable, insulating
+    dos_mesh: List[int]
+    imaginary_fraction: float

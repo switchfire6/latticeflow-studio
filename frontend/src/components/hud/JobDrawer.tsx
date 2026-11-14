@@ -11,6 +11,7 @@ import { ArrowDown, ArrowUp, ListChecks, Loader2, Pause, X } from "lucide-react"
 import { useEffect, useMemo, useState } from "react";
 import {
   PRESETS,
+  NEEDS_PHONONS,
   STEP_LABEL,
   STEP_ORDER,
   cancelChain,
@@ -58,6 +59,11 @@ const STATUS_CLS: Record<Job["status"], string> = {
   failed: "border-bad/50 text-bad",
   cancelled: "border-line text-fg-4 line-through",
   skipped: "border-line text-fg-4",
+};
+
+const STEP_TITLE: Partial<Record<StepChoice, string>> = {
+  "follow-if-unstable": "Follow the softest imaginary mode; skipped when the phonons are stable",
+  superconductivity: "Superconductivity proxies from the phonon DOS (ω_log, Allen–Dynes T_c at an assumed λ — not a prediction) plus a metallicity check",
 };
 
 function stepName(j: Job): string {
@@ -138,7 +144,7 @@ function NewBatch() {
   const toggleStep = (c: StepChoice) =>
     setSteps((s) => {
       const next = s.includes(c) ? s.filter((x) => x !== c) : [...s, c];
-      return next.includes("phonons") ? next : next.filter((x) => x !== "follow-if-unstable");
+      return next.includes("phonons") ? next : next.filter((x) => !NEEDS_PHONONS.includes(x));
     });
   const n = picked.length + (current ? 1 : 0);
   const submit = async () => {
@@ -188,8 +194,8 @@ function NewBatch() {
       </div>
       <div className="flex flex-wrap gap-0.5">
         {STEP_ORDER.map((c) => (
-          <span key={c} className={c === "follow-if-unstable" && !steps.includes("phonons") ? "pointer-events-none opacity-35" : undefined}>
-            <Toggle label={STEP_LABEL[c]} checked={steps.includes(c)} onChange={() => toggleStep(c)} title={c === "follow-if-unstable" ? "Follow the softest imaginary mode; skipped when the phonons are stable" : undefined} />
+          <span key={c} className={NEEDS_PHONONS.includes(c) && !steps.includes("phonons") ? "pointer-events-none opacity-35" : undefined}>
+            <Toggle label={STEP_LABEL[c]} checked={steps.includes(c)} onChange={() => toggleStep(c)} title={STEP_TITLE[c]} />
           </span>
         ))}
       </div>

@@ -79,6 +79,14 @@ export const SUMMARY_COLUMNS: readonly ColumnDef[] = [
   { key: "n_peaks", label: "XRD peaks", kind: "number", digits: 0 },
   { key: "strongest_peak_two_theta", label: "Strongest 2θ", unit: "°", kind: "number", digits: 2 },
   { key: "temperature_k", label: "T (MD)", unit: "K", kind: "number", digits: 0 },
+  // Superconductivity Tier 0 proxies (T_c,ref: Allen–Dynes at an assumed λ = 1, μ* = 0.10; a ranking scale, not a prediction).
+  { key: "omega_log_k", label: "ω_log", unit: "K", kind: "number", digits: 0 },
+  { key: "omega_2_k", label: "ω̄₂", unit: "K", kind: "number", digits: 0 },
+  { key: "tc_ref_k", label: "T_c,ref", unit: "K", kind: "number", digits: 1 },
+  { key: "light_element_fraction", label: "Light-el. frac.", kind: "number", digits: 2 },
+  { key: "metallicity", label: "Metallicity", kind: "text" },
+  { key: "sc_flags", label: "SC flags", kind: "text" },
+  { key: "sc_gate_pass", label: "SC gate", kind: "bool" },
 ];
 
 export interface TableRow {

@@ -40,7 +40,7 @@ from typing import Any, Dict, Iterable, Iterator, List, Optional, Sequence
 from app import __version__ as CODE_VERSION
 
 DEFAULT_PROJECT_NAME = "Scratch"
-RESULT_KINDS = ("relax", "phonons", "elastic", "eos", "hull", "md", "diffraction")
+RESULT_KINDS = ("relax", "phonons", "elastic", "eos", "hull", "md", "diffraction", "superconductivity")
 JOB_STATUSES = ("queued", "running", "done", "failed", "cancelled", "skipped")
 ACTIVE_STATUSES = ("queued", "running")
 FINISHED_STATUSES = ("done", "failed", "cancelled", "skipped")
@@ -230,6 +230,18 @@ def summarize(kind: str, data: Dict[str, Any]) -> Dict[str, Any]:
         peaks = data.get("peaks") or []
         top = max(peaks, key=lambda p: p.get("intensity", 0.0)) if peaks else None
         return {"n_peaks": len(peaks), "strongest_peak_two_theta": _num(top["two_theta"]) if top else None}
+    if kind == "superconductivity":   # Tier 0 proxies: tc_ref_k is a ranking scale at an assumed λ, not a T_c
+        d = data.get("descriptors") or {}
+        verdict = (data.get("metallicity") or {}).get("verdict")
+        return {
+            "omega_log_k": _num(d.get("omega_log_k")),
+            "omega_2_k": _num(d.get("omega_2_k")),
+            "tc_ref_k": _num(d.get("tc_ref_k")),
+            "light_element_fraction": _num(d.get("light_element_fraction")),
+            "metallicity": verdict,
+            "sc_flags": ",".join(str(f) for f in (data.get("flags") or [])),
+            "sc_gate_pass": bool(d.get("reliable")) and verdict not in ("insulator", "likely_insulator"),
+        }
     raise LibraryError(f"unknown result kind {kind!r}")
 
 

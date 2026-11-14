@@ -1,9 +1,9 @@
-"""Batch screening: compositions -> generate (top_k) -> relax -> phonons -> [hull] -> [elastic] -> table.
+"""Batch screening: compositions -> generate (top_k) -> relax -> phonons -> [sc] -> [hull] -> [elastic] -> table.
 
 CLI::
 
     latticeflow-screen compositions.csv --out results.csv [--url http://localhost:8000]
-                       [--top-k 3] [--hull] [--elastic] [--fmax 0.02] [--steps 60] [--seed 0]
+                       [--top-k 3] [--sc] [--hull] [--elastic] [--fmax 0.02] [--steps 60] [--seed 0]
                        [--queue [--project Screening]]
 
 ``compositions.csv`` has a ``composition`` column (atoms per cell, e.g. ``SrTiO3``,
@@ -25,6 +25,13 @@ Columns: composition, candidate_rank, formula, n_atoms, spacegroup_generated,
 spacegroup, spacegroup_number, energy_per_atom_ev, pressure_gpa, max_force_ev_a,
 relax_converged, min_frequency_thz, dynamically_stable, imaginary_mode_count,
 e_hull_ev, k_vrh_gpa, g_vrh_gpa, born_stable, model, error.
+
+``--sc`` (superconductivity Tier 0 pre-screen) adds a ``superconductivity`` stage after phonons and the
+columns omega_log_k, omega_2_k, tc_ref_k, light_element_fraction, metallicity, sc_flags, sc_gate_pass
+(before ``model``), and sorts the table by sc_gate_pass, then tc_ref_k (both descending). These are
+*proxies*: the force field has no electrons, so lambda is assumed (tc_ref_k is Allen-Dynes at lambda = 1.0,
+mu* = 0.10, a ranking scale, not a predicted T_c). In session mode the descriptors come from the phonon
+DOS and ``soft_mode`` is checked at the labelled q-points only; ``--queue`` runs the server's job step.
 """
 
 from __future__ import annotations
@@ -46,6 +53,11 @@ COLUMNS = [
     "min_frequency_thz", "dynamically_stable", "imaginary_mode_count", "e_hull_ev", "k_vrh_gpa",
     "g_vrh_gpa", "born_stable", "model", "error",
 ]
+
+SC_COLUMNS = ["omega_log_k", "omega_2_k", "tc_ref_k", "light_element_fraction", "metallicity", "sc_flags",
+              "sc_gate_pass"]
+#: COLUMNS with the --sc columns inserted before "model"
+SC_TABLE_COLUMNS = COLUMNS[:COLUMNS.index("model")] + SC_COLUMNS + COLUMNS[COLUMNS.index("model"):]
 
 _ROW_OPTIONS = ("target_spacegroup", "target_crystal_system", "top_k", "seed")
 
@@ -84,7 +96,7 @@ def _model_name(studio: Studio) -> Optional[str]:
 def screen_composition(studio: Studio, spec: Dict[str, Any], *, top_k: int = 3, hull: bool = False,
                        elastic: bool = False, relax_options: Optional[Dict[str, Any]] = None,
                        phonon_options: Optional[Dict[str, Any]] = None,
-                       generate_options: Optional[Dict[str, Any]] = None) -> List[Dict[str, Any]]:
+                       generate_options: Optional[Dict[str, Any]] = None, sc: bool = False) -> List[Dict[str, Any]]:
     """All candidate rows of one composition (never raises :class:`StudioError`; connection errors propagate)."""
     composition = spec["composition"]
     base = {"composition": composition, "model": _model_name(studio)}
@@ -102,13 +114,50 @@ def screen_composition(studio: Studio, spec: Dict[str, Any], *, top_k: int = 3, 
     for cand in candidates:
         rows.append(_screen_candidate(studio, dict(base, candidate_rank=cand.get("rank", 1)), cand["crystal"],
                                       hull=hull, elastic=elastic, relax_options=relax_options,
-                                      phonon_options=phonon_options))
+                                      phonon_options=phonon_options, sc=sc))
     return rows
 
 
+def sc_row_fields(phonons: Dict[str, Any], dos: Dict[str, Any], metallicity: Dict[str, Any]) -> Dict[str, Any]:
+    """The --sc columns from a PHONON_ANALYSIS_COMPLETE, its PHONON_DOS_DATA (``eph_proxy``) and a metallicity
+    reply, with the server step's flag rules (``soft_mode`` at the labelled q-points only)."""
+    d = dos.get("eph_proxy") or {}
+    verdict = metallicity.get("verdict")
+    flags = []
+    if (d.get("light_element_fraction") or 0.0) >= 0.05:
+        flags.append("light_elements")
+    if d.get("omega_log_k") is not None and d["omega_log_k"] >= 400.0:
+        flags.append("high_omega_log")
+    w_max = d.get("omega_max_k")
+    if phonons.get("is_dynamically_stable") and w_max:
+        limit = 0.1 * w_max / 47.99243
+        far = {m["q_index"] for m in phonons.get("eigenmodes") or []
+               if sum(x * x for x in m["q_frac"]) ** 0.5 > 0.1}
+        freqs = phonons.get("frequencies_thz") or []
+        if any(min(freqs[q]) < limit for q in far if q < len(freqs)):
+            flags.append("soft_mode")
+    if not d.get("reliable"):
+        flags.append("unstable")
+    if verdict in ("insulator", "likely_insulator"):
+        flags.append("insulating")
+    return {"omega_log_k": d.get("omega_log_k"), "omega_2_k": d.get("omega_2_k"), "tc_ref_k": d.get("tc_ref_k"),
+            "light_element_fraction": d.get("light_element_fraction"), "metallicity": verdict,
+            "sc_flags": ",".join(flags),
+            "sc_gate_pass": bool(d.get("reliable")) and verdict not in ("insulator", "likely_insulator")}
+
+
+def sort_sc_rows(rows: Sequence[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """sc_gate_pass descending, then tc_ref_k descending (missing values last; stable otherwise)."""
+    def key(r: Dict[str, Any]):
+        tc = r.get("tc_ref_k")
+        return (not bool(r.get("sc_gate_pass")), tc is None, -(tc or 0.0))
+
+    return sorted(rows, key=key)
+
+
 def _screen_candidate(studio: Studio, row: Dict[str, Any], crystal: Dict[str, Any], *, hull: bool, elastic: bool,
-                      relax_options: Optional[Dict[str, Any]], phonon_options: Optional[Dict[str, Any]]
-                      ) -> Dict[str, Any]:
+                      relax_options: Optional[Dict[str, Any]], phonon_options: Optional[Dict[str, Any]],
+                      sc: bool = False) -> Dict[str, Any]:
     row["spacegroup_generated"] = crystal.get("spacegroup_symbol")
     stage = "load"
     try:
@@ -124,6 +173,9 @@ def _screen_candidate(studio: Studio, row: Dict[str, Any], crystal: Dict[str, An
         ph = studio.phonons(**dict({"cell_mode": "primitive"}, **(phonon_options or {})))
         row.update(min_frequency_thz=ph["min_frequency_thz"], dynamically_stable=ph["is_dynamically_stable"],
                    imaginary_mode_count=ph["imaginary_mode_count"])
+        if sc:
+            stage = "superconductivity"
+            row.update(sc_row_fields(ph, studio.phonon_dos(), studio.metallicity(c)))
         if hull:
             stage = "hull"
             row["e_hull_ev"] = studio.hull(c, relax=False)["e_hull_ev"]   # already relaxed above
@@ -142,7 +194,7 @@ def screen(compositions: Iterable[Any], *, url: str = "http://localhost:8000", t
            hull: bool = False, elastic: bool = False, relax_options: Optional[Dict[str, Any]] = None,
            phonon_options: Optional[Dict[str, Any]] = None, generate_options: Optional[Dict[str, Any]] = None,
            on_row: Optional[Callable[[Dict[str, Any]], Any]] = None, studio: Optional[Studio] = None,
-           timeout: Optional[float] = None) -> List[Dict[str, Any]]:
+           timeout: Optional[float] = None, sc: bool = False) -> List[Dict[str, Any]]:
     """Screen ``compositions`` (strings or row dicts, see :func:`read_compositions`); returns all rows."""
     own = studio is None
     rows: List[Dict[str, Any]] = []
@@ -155,7 +207,7 @@ def screen(compositions: Iterable[Any], *, url: str = "http://localhost:8000", t
                         studio = Studio(url, timeout=timeout)
                     new = screen_composition(studio, spec, top_k=top_k, hull=hull, elastic=elastic,
                                              relax_options=relax_options, phonon_options=phonon_options,
-                                             generate_options=generate_options)
+                                             generate_options=generate_options, sc=sc)
                     break
                 except StudioConnectionError as exc:
                     if own and studio is not None:
@@ -184,10 +236,12 @@ def find_or_create_project(studio: Studio, name: str) -> Dict[str, Any]:
 
 
 def queue_steps(*, hull: bool = False, elastic: bool = False, relax_options: Optional[Dict[str, Any]] = None,
-                phonon_options: Optional[Dict[str, Any]] = None) -> List[Dict[str, Any]]:
+                phonon_options: Optional[Dict[str, Any]] = None, sc: bool = False) -> List[Dict[str, Any]]:
     """The job chain equivalent to :func:`screen_composition`'s stages."""
     steps = [job_step("relax", **(relax_options or {})),
              job_step("phonons", **dict({"cell_mode": "primitive"}, **(phonon_options or {})))]
+    if sc:
+        steps.append(job_step("superconductivity"))
     if hull:
         steps.append(job_step("hull", relax=False))   # the chain's relax step already relaxed it
     if elastic:
@@ -197,7 +251,7 @@ def queue_steps(*, hull: bool = False, elastic: bool = False, relax_options: Opt
 
 _SUMMARY_COLUMNS = ("energy_per_atom_ev", "pressure_gpa", "max_force_ev_a", "relax_converged", "min_frequency_thz",
                     "dynamically_stable", "imaginary_mode_count", "e_hull_ev", "k_vrh_gpa", "g_vrh_gpa",
-                    "born_stable")
+                    "born_stable", *SC_COLUMNS)
 
 
 def _row_from_library(row: Dict[str, Any], chain: List[Dict[str, Any]],
@@ -222,7 +276,7 @@ def screen_queued(compositions: Iterable[Any], *, url: str = "http://localhost:8
                   relax_options: Optional[Dict[str, Any]] = None, phonon_options: Optional[Dict[str, Any]] = None,
                   generate_options: Optional[Dict[str, Any]] = None,
                   on_job: Optional[Callable[[Dict[str, Any]], Any]] = None, studio: Optional[Studio] = None,
-                  timeout: Optional[float] = None, poll: float = 1.5) -> List[Dict[str, Any]]:
+                  timeout: Optional[float] = None, poll: float = 1.5, sc: bool = False) -> List[Dict[str, Any]]:
     """Like :func:`screen`, but the per-candidate stages run as job chains in the server's queue.
 
     Generates the candidates of every composition, saves them to ``project`` (found by name, created if
@@ -265,7 +319,8 @@ def screen_queued(compositions: Iterable[Any], *, url: str = "http://localhost:8
                 sids.append(sid)
 
         unique = list(dict.fromkeys(s for s in sids if s is not None))   # dedup'd candidates share a chain
-        steps = queue_steps(hull=hull, elastic=elastic, relax_options=relax_options, phonon_options=phonon_options)
+        steps = queue_steps(hull=hull, elastic=elastic, relax_options=relax_options, phonon_options=phonon_options,
+                            sc=sc)
         jobs: List[Dict[str, Any]] = []
         for i in range(0, len(unique), 500):   # POST /api/jobs takes at most 500 structures
             jobs += studio.submit_jobs(pid, unique[i:i + 500], steps)
@@ -287,16 +342,17 @@ def screen_queued(compositions: Iterable[Any], *, url: str = "http://localhost:8
             studio.close()
 
 
-def write_rows(rows: Sequence[Dict[str, Any]], path: str) -> None:
+def write_rows(rows: Sequence[Dict[str, Any]], path: str, columns: Optional[Sequence[str]] = None) -> None:
+    columns = list(columns or COLUMNS)
     if path.lower().endswith(".json"):
         with open(path, "w", encoding="utf-8") as fh:
-            json.dump([{k: r.get(k) for k in COLUMNS} for r in rows], fh, indent=2)
+            json.dump([{k: r.get(k) for k in columns} for r in rows], fh, indent=2)
         return
     with open(path, "w", encoding="utf-8", newline="") as fh:
-        writer = csv.DictWriter(fh, fieldnames=COLUMNS, extrasaction="ignore")
+        writer = csv.DictWriter(fh, fieldnames=columns, extrasaction="ignore")
         writer.writeheader()
         for r in rows:
-            writer.writerow({k: ("" if r.get(k) is None else r.get(k)) for k in COLUMNS})
+            writer.writerow({k: ("" if r.get(k) is None else r.get(k)) for k in columns})
 
 
 def main(argv: Optional[Sequence[str]] = None) -> int:
@@ -307,6 +363,9 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     ap.add_argument("--top-k", type=int, default=3, help="candidates per composition (1-10)")
     ap.add_argument("--hull", action="store_true", help="E_hull per candidate (needs MP_API_KEY on the server)")
     ap.add_argument("--elastic", action="store_true", help="elastic tensor per candidate (K_VRH, G_VRH, Born)")
+    ap.add_argument("--sc", action="store_true",
+                    help="superconductivity pre-screen after phonons: phonon-scale proxies at an assumed lambda "
+                         "(no electrons; not a T_c prediction) and a metallicity gate; sorts by gate, then tc_ref_k")
     ap.add_argument("--fmax", type=float, default=0.02, help="relaxation force tolerance, eV/A")
     ap.add_argument("--max-steps", type=int, default=300, help="relaxation step limit")
     ap.add_argument("--steps", type=int, default=None, help="generator flow steps")
@@ -324,10 +383,11 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         return 2
     gen_opts = {k: v for k, v in (("steps", args.steps), ("seed", args.seed)) if v is not None}
     rows: List[Dict[str, Any]] = []
+    columns = SC_TABLE_COLUMNS if args.sc else COLUMNS
 
     def report(row: Dict[str, Any]) -> None:
         rows.append(row)
-        write_rows(rows, args.out)   # rewrite after every row: partial results survive an interrupt
+        write_rows(rows, args.out, columns)   # rewrite after every row: partial results survive an interrupt
         status = row.get("error") or (
             f"{row.get('spacegroup')}  E={row.get('energy_per_atom_ev'):.4f} eV/atom  "
             f"fmin={row.get('min_frequency_thz', float('nan')):.2f} THz"
@@ -343,12 +403,16 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
 
         for row in screen_queued(specs, url=args.url, project=args.project, top_k=args.top_k, hull=args.hull,
                                  elastic=args.elastic, relax_options=relax_options, generate_options=gen_opts,
-                                 on_job=job_update, timeout=args.timeout):
+                                 on_job=job_update, timeout=args.timeout, sc=args.sc):
             report(row)
+        if args.sc:
+            write_rows(sort_sc_rows(rows), args.out, columns)
         print(f"{len(rows)} rows -> {args.out} (project {args.project!r} in the library)")
         return 0
     screen(specs, url=args.url, top_k=args.top_k, hull=args.hull, elastic=args.elastic,
-           relax_options=relax_options, generate_options=gen_opts, on_row=report, timeout=args.timeout)
+           relax_options=relax_options, generate_options=gen_opts, on_row=report, timeout=args.timeout, sc=args.sc)
+    if args.sc:
+        write_rows(sort_sc_rows(rows), args.out, columns)
     print(f"{len(rows)} rows -> {args.out}")
     return 0
 

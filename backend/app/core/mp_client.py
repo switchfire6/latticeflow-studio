@@ -31,7 +31,7 @@ from app.schemas.api import MPEntry
 MAX_RESULTS = 50
 MAX_CONVENTIONAL_ATOMS = 64
 MP_SEARCH_FIELDS = ["material_id", "formula_pretty", "symmetry", "nsites", "energy_above_hull",
-                    "is_stable", "theoretical"]
+                    "is_stable", "theoretical", "band_gap", "is_metal"]
 # Classic ids are numeric ("mp-5229"); newer Materials Project entries use letters ("mp-aaaieiuj").
 _ID_RE = re.compile(r"^(mp|mvc)-[a-z0-9]+$", re.IGNORECASE)
 
@@ -133,6 +133,8 @@ def entry_from_doc(doc: Any) -> MPEntry:
     ehull = _get(doc, "energy_above_hull")
     stable = _get(doc, "is_stable")
     theo = _get(doc, "theoretical")
+    gap = _float_or_none(_get(doc, "band_gap"))
+    metal = _get(doc, "is_metal")
     return MPEntry(
         material_id=str(_get(doc, "material_id")),
         formula=str(_get(doc, "formula_pretty") or ""),
@@ -142,7 +144,20 @@ def entry_from_doc(doc: Any) -> MPEntry:
         energy_above_hull=float(ehull) if ehull is not None else None,
         is_stable=bool(stable) if stable is not None else None,
         theoretical=bool(theo) if theo is not None else None,
+        band_gap=gap,
+        is_metal=bool(metal) if metal is not None else None,
     )
+
+
+def _float_or_none(x: Any) -> Optional[float]:
+    """Tolerant read of an optional numeric field (missing / unparsable / non-finite -> None)."""
+    import math
+
+    try:
+        v = float(x)
+    except (TypeError, ValueError):
+        return None
+    return v if math.isfinite(v) else None
 
 
 def sort_entries(entries: List[MPEntry]) -> List[MPEntry]:

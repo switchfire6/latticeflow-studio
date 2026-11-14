@@ -51,11 +51,18 @@ export function useJobPolling(): void {
 
 // ------------------------------------------------------------------ steps
 export type StepChoice = StepKind | "follow-if-unstable";
-/** Canonical order of the step picker (follow must directly follow phonons). */
-export const STEP_ORDER: readonly StepChoice[] = ["relax", "phonons", "follow-if-unstable", "elastic", "eos", "hull"];
+/**
+ * Canonical order of the step picker. Follow needs phonons with no relax in
+ * between; SC proxies reuse the phonons without resetting them, so
+ * phonons → superconductivity → follow is valid.
+ */
+export const STEP_ORDER: readonly StepChoice[] = ["relax", "phonons", "superconductivity", "follow-if-unstable", "elastic", "eos", "hull"];
+/** Steps that need a phonons step earlier in the chain (dropped when phonons is unticked). */
+export const NEEDS_PHONONS: readonly StepChoice[] = ["superconductivity", "follow-if-unstable"];
 export const STEP_LABEL: Record<StepChoice, string> = {
   relax: "Relax",
   phonons: "Phonons",
+  superconductivity: "SC proxies",
   "follow-if-unstable": "Follow if unstable",
   follow: "Follow",
   elastic: "Elastic",
@@ -90,6 +97,10 @@ export function buildSteps(choices: readonly StepChoice[]): JobStep[] {
         out.push({ kind: "phonons", settings });
         break;
       }
+      case "superconductivity":
+        // mesh null = the server's default DOS mesh; use_mp falls back to the heuristic without an MP key.
+        if (choices.includes("phonons")) out.push({ kind: "superconductivity", settings: { mesh: null, use_mp: true } });
+        break;
       case "follow-if-unstable":
         if (choices.includes("phonons")) out.push({ kind: "follow", settings: {}, only_if_unstable: true });
         break;

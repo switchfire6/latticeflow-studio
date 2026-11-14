@@ -27,6 +27,8 @@ Error mapping (body is always ``ErrorResponse``, ``code`` an ``ErrorCode`` value
   no entry of the formula is a 200 with ``n_searched = 0``.
 * Phase D: ``/api/health`` reports the configured size limits ``max_atoms``
   (``LATTICEFLOW_MAX_ATOMS``) and ``phonon_max_atoms`` (``LATTICEFLOW_PHONON_MAX_ATOMS``).
+* Superconductivity Tier 0 ``/api/superconductivity/metallicity``: 422 for invalid payloads only; no MP key,
+  an MP failure or no match fall back to the composition heuristic (200, ``reason`` says why).
 
 The handlers are HTTP-only: ``RequestValidationError`` never arises on the
 WebSocket route (that is ``WebSocketRequestValidationError``), ``ApiError`` is
@@ -76,6 +78,8 @@ from app.presets import PresetInfo, list_presets
 from app.schemas.api import (
     CompareRequest,
     CompareResponse,
+    MetallicityRequest,
+    MetallicityResponse,
     MPMatchRequest,
     MPMatchResponse,
     DiffractionRequest,
@@ -447,3 +451,19 @@ def mp_match(req: MPMatchRequest, ctx: MPContext = Depends(mp_context)) -> MPMat
         raise
     except Exception as exc:  # noqa: BLE001
         raise _compute_failed("MP matching", exc) from exc
+
+
+@router.post("/superconductivity/metallicity", response_model=MetallicityResponse, responses=_ERROR_RESPONSES)
+def superconductivity_metallicity(req: MetallicityRequest, ctx: MPContext = Depends(mp_context)) -> MetallicityResponse:
+    """Metallicity gate of the superconductivity Tier 0 pre-screen: the Materials Project gap of the best
+    structure match, else a composition heuristic (no MP key / MP error / no match: still a 200)."""
+    from app.core import superconductivity as sc
+
+    atoms = _payload_atoms(req.crystal)
+    client, why = ctx.client, None
+    if req.use_mp and client is None:
+        client, why = sc.mp_client_or_reason(ctx.api_key)
+    try:
+        return sc.assess_metallicity(atoms, client, req.use_mp, unavailable_reason=why)
+    except Exception as exc:  # noqa: BLE001
+        raise _compute_failed("metallicity check", exc) from exc

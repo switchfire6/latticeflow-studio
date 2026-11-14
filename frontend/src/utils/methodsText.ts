@@ -26,6 +26,8 @@ export interface MethodsInput {
   eos?: { settings: Settings; model: MethodsModel };
   hull?: { nReferences: number; chemsys: string; candidateRelaxed: boolean; model: MethodsModel };
   diffraction?: { kind: string; radiation: string | null; wavelength: number; range?: [number, number] | null };
+  /** Superconductivity Tier 0 proxies from the phonon DOS (mesh of that DOS). */
+  superconductivity?: { mesh?: readonly number[] | null };
 }
 
 const num = (v: unknown): number | null => (typeof v === "number" && Number.isFinite(v) ? v : null);
@@ -98,6 +100,11 @@ function diffractionSentence(d: NonNullable<MethodsInput["diffraction"]>): strin
   return `powder ${rad} diffraction patterns were simulated with pymatgen (${src}λ = ${d.wavelength.toFixed(4)} Å${range})`;
 }
 
+function superconductivitySentence(sc: NonNullable<MethodsInput["superconductivity"]>): string {
+  const mesh = sc.mesh && sc.mesh.length === 3 ? ` (${sc.mesh.join("×")} q-mesh)` : "";
+  return `superconductivity screening proxies (ω_log, ω̄₂ and the Allen–Dynes T_c for an assumed electron–phonon coupling λ and Coulomb pseudopotential μ*) were derived from the phonon density of states${mesh} in the constant-coupling approximation α²F(ω) ∝ F(ω); λ was not computed, so these T_c values rank candidates by phonon energy scale and are not predictions`;
+}
+
 const cap = (s: string) => s.charAt(0).toUpperCase() + s.slice(1);
 
 const CITATIONS = {
@@ -120,6 +127,7 @@ export function buildMethodsText(input: MethodsInput): string | null {
   if (input.eos) parts.push({ text: eosSentence(input.eos), model: input.eos.model });
   if (input.hull) parts.push({ text: hullSentence(input.hull), model: input.hull.model });
   if (input.diffraction) parts.push({ text: diffractionSentence(input.diffraction), model: null });
+  if (input.superconductivity) parts.push({ text: superconductivitySentence(input.superconductivity), model: null });
   if (!parts.length) return null;
 
   const models = parts.map((p) => p.model).filter((m): m is MethodsModel => !!m);

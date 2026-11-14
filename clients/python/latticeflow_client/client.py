@@ -657,6 +657,13 @@ class Studio:
         """``POST /api/mp/match``: Materials Project entries matching the structure."""
         return self._rest("POST", "/api/mp/match", json={"crystal": self._crystal_arg(crystal)}).json()
 
+    def metallicity(self, crystal: Optional[Crystal] = None, use_mp: bool = True) -> Dict[str, Any]:
+        """``POST /api/superconductivity/metallicity``: the superconductivity pre-screen's metallicity gate
+        (``verdict``, ``source``, ``band_gap_ev``, ``mp_id``, ``reason``). Uses the Materials Project gap of the
+        best structure match when the server has an MP key, else a composition heuristic."""
+        body = {"crystal": self._crystal_arg(crystal), "use_mp": bool(use_mp)}
+        return self._rest("POST", "/api/superconductivity/metallicity", json=body).json()
+
     def compare(self, a: Union[Crystal, int], b: Union[Crystal, int, None] = None) -> Dict[str, Any]:
         """``POST /api/compare`` of two structures, each a payload or an undo-history position
         (fetched with :meth:`history_entry`); ``b`` defaults to the active structure."""
@@ -776,8 +783,9 @@ class Studio:
         """``POST /api/jobs``: one chain per structure -> every created ``Job``, chain by chain in step order.
 
         ``steps`` are step dicts (``{"kind", "settings", "only_if_unstable"}``, see :func:`job_step`) or bare
-        kinds (``"relax"``, ``"phonons"``, ``"elastic"``, ``"eos"``, ``"hull"``, ``"follow"``); omitted
-        settings take the UI defaults. Without ``model_id`` the session's model (:meth:`set_model`) is used,
+        kinds (``"relax"``, ``"phonons"``, ``"elastic"``, ``"eos"``, ``"hull"``, ``"follow"``,
+        ``"superconductivity"``); omitted settings take the UI defaults. ``follow`` and ``superconductivity``
+        need a ``phonons`` step earlier in the chain (no relax / follow in between). Without ``model_id`` the session's model (:meth:`set_model`) is used,
         else the server default. Each later step runs on the output of the last relax / follow before it.
         """
         ids = [int(structure_ids)] if isinstance(structure_ids, int) else [int(s) for s in structure_ids]

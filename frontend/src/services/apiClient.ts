@@ -14,6 +14,8 @@ import type {
   HealthResponse,
   HullEvaluateRequest,
   HullEvaluateResponse,
+  MetallicityRequest,
+  MetallicityResponse,
   ModelListResponse,
   MPMatchRequest,
   MPMatchResponse,
@@ -145,6 +147,8 @@ export function createApiClient(opts: ApiClientOptions = {}) {
     compare: (body: CompareRequest, signal?: AbortSignal) => postJson<CompareResponse>("/compare", body, signal),
     /** Materials Project entries matching a structure (POST /api/mp/match). */
     mpMatch: (body: MPMatchRequest, signal?: AbortSignal) => postJson<MPMatchResponse>("/mp/match", body, signal),
+    /** Metallicity gate for superconductivity screening (POST /api/superconductivity/metallicity). */
+    metallicity: (body: MetallicityRequest, signal?: AbortSignal) => postJson<MetallicityResponse>("/superconductivity/metallicity", body, signal),
 
     // ---- Project library (protocol §6)
     projects: () => getJson<Project[]>("/projects"),

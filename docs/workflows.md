@@ -177,3 +177,27 @@ for row in studio.structures(pid):                          # inputs and their r
 - `export_project(pid, "perovskites.json")` and `import_project(path)` move a project, with its lineage and results, between machines.
 
 From the command line, `latticeflow-screen compositions.csv --out results.csv --queue --project Perovskites --elastic` does the same for generated candidates.
+
+## 7. Superconductivity pre-screen (Tier 0 proxies)
+
+This ranks candidates for conventional, phonon-mediated superconductivity by their **phonon energy scale**. It is a proxy, not a prediction: the force field has no electrons, so the electron–phonon coupling λ is *assumed*. Every T_c it shows is Allen–Dynes at that assumed λ (and μ\*), with α²F(ω) ∝ F(ω). `tc_ref_k` (λ = 1.0, μ\* = 0.10) only orders candidates. A metallicity gate (Materials Project GGA gap if a key is set, else a composition heuristic) drops likely insulators. Shortlisted candidates need a DFT electron–phonon calculation.
+
+**In the UI**
+1. Relax, run phonons, then open the DOS. The **Superconductivity proxies** section shows ω_log, ω̄₂, the light-element fraction and T_c(λ) for both μ\* values; the λ / μ\* sliders only change the assumed coupling. **Check metallicity** runs the gate.
+2. For many structures, add the **SC proxies** step after **Phonons** in the job queue, then sort the results table by `sc_gate_pass` and `tc_ref_k`.
+
+**In Python**
+```python
+studio.relax(fmax=0.01)
+studio.phonons(cell_mode="primitive")
+proxy = studio.phonon_dos()["eph_proxy"]          # ω_log, ω̄₂, tc_grid (assumed λ), reliable, warnings
+gate = studio.metallicity()                       # verdict, source, band_gap_ev, reason
+
+jobs = studio.submit_jobs(pid, ids, ["relax", "phonons", "superconductivity"])
+studio.wait_jobs(jobs)
+rows = sorted(studio.structures(pid), key=lambda r: (not r["latest"].get("sc_gate_pass", False),
+                                                     -(r["latest"].get("tc_ref_k") or 0.0)))
+```
+- Read `reliable` and `warnings` first: with more than 1 % imaginary DOS modes the structure is unstable and `tc_ref_k` is `null`.
+- The flags (`sc_flags`) mark light elements, a high ω_log, a soft branch away from Γ, instability and an insulating verdict.
+- From the command line: `latticeflow-screen compositions.csv --out sc.csv --sc` (add `--queue` to run it as job chains). The table is sorted by `sc_gate_pass`, then `tc_ref_k`.

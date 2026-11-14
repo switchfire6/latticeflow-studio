@@ -99,7 +99,7 @@ Notes:
 | `GENERATION_CANDIDATES` | `summary` (space group, composition, Wyckoff combinations, structures screened and scored), `candidates[]` (`rank`, `energy_per_atom`, `relative_energy_mev_per_atom`, `spacegroup_*`, `wyckoff_assignment`, `crystal`) | |
 | `PHONON_ANALYSIS_COMPLETE` | `is_dynamically_stable`, `min_frequency_thz`, `imaginary_mode_count`, `kpath_distances`, `kpath_labels`, `frequencies_thz[q][branch]` (ascending, signed: negative = imaginary), `eigenmodes` (every band at each labelled point), `cell_mode`, `n_primitive_atoms`, `supercell_dim`, `min_image_distance`, `band_order`, `gamma_modes` (irreps, IR/Raman activity), `band_path_source` | eigenvectors are indexed by the displayed atoms in both cell modes |
 | `EIGENMODE_DATA` | `{eigenmode}` (`q_frac`, `frequency_thz`, N×3 real / imaginary eigenvectors) | |
-| `PHONON_DOS_DATA` | `mesh`, `frequencies_thz`, `total_dos`, `projected_dos{el}`, `thermal` (F, S, C_v per atom, ZPE), `imaginary_fraction` | imaginary modes are excluded from the thermodynamics |
+| `PHONON_DOS_DATA` | `mesh`, `frequencies_thz`, `total_dos`, `projected_dos{el}`, `thermal` (F, S, C_v per atom, ZPE), `imaginary_fraction`, `eph_proxy?` | imaginary modes are excluded from the thermodynamics. `eph_proxy` (superconductivity Tier 0 proxies, `null` if they could not be computed): `omega_log_k`, `omega_2_k`, `omega_mean_k`, `omega_max_k`, `light_element_fraction`, `tc_grid[]` (`lam`, `mu_star`, `tc_k`; λ ∈ {0.3, 0.5, 0.75, 1, 1.5, 2} × μ* ∈ {0.10, 0.13}, λ-major), `tc_ref_k` (λ = 1, μ* = 0.10; `null` when not `reliable`), `reliable`, `warnings[]`, `method`. These come from a constant-coupling proxy α²F ∝ F(ω): the force field has no electrons, so λ is **assumed** and every T_c is Allen–Dynes at that assumed λ, a ranking scale, not a prediction (docs/design/SUPERCONDUCTIVITY_TIER0.md) |
 | `PHONON_CONVERGENCE_RESULT` | supercells and min frequencies a/b, `max_abs_delta_thz`, `rms_delta_thz`, `per_label_max_delta_thz`, `tolerance_thz=0.1`, `converged` | |
 | `BULK_MODULUS_RESULT` | `k_gpa`, `k_stress_gpa`, `v0`, `pressure_gpa`, `v_eq`, `k_eq_gpa`, `k_eq_prime`, `extrapolated`, E(V) / P(V) data, `method` | clamped ion, fixed shape, BM-3 fit |
 | `ELASTIC_TENSOR_RESULT` | `c_ij_gpa` 6×6 Voigt, `eigenvalues_gpa`, `born_stable`, K/G (Voigt, Reuss, VRH), Young's modulus, Poisson's ratio, Pugh's ratio, `universal_anisotropy`, `debye_temperature_k`, `relaxed_ions`, `reference_pressure_gpa`, `fit_residual_gpa`, `method` | |
@@ -167,9 +167,10 @@ Every endpoint in this section is stateless and none touches a WebSocket session
 | `POST /api/export/cif` | `crystal`, `format=cif`/`poscar`/`extxyz`, `symmetrize=true`, `symprec=0.01`, `cell=as_is`/`conventional`/`primitive` (extxyz: `as_is` only) | text attachment |
 | `POST /api/hull/evaluate` | `crystal`, `relax=true`, `model_id?`, `dispersion=false` | `chemsys`, `energy_per_atom`, `e_hull_ev`, `formation_energy_per_atom`, `decomposition`, `references[]`, `candidate_relaxed`, `energy_per_atom_as_given`, `method`, `phase_diagram` (plot data, §8). MP references are relaxed with the same model and cached. 503 `HULL_UNAVAILABLE` without `MP_API_KEY` |
 | `POST /api/diffraction` | `crystal`, `kind=xray`/`neutron`, `radiation=CuKa`, `wavelength_angstrom?`, `two_theta_min=5`, `two_theta_max=90` | `peaks[]` (2θ, intensity scaled to a maximum of 100, d, hkls) |
-| `GET /api/mp/search?q=` | formula, chemical system (`Li-Fe-O`) or mp-id | `results[]` (MP entries, ≤ 50, sorted by MP E_hull) |
+| `GET /api/mp/search?q=` | formula, chemical system (`Li-Fe-O`) or mp-id | `results[]` (MP entries, ≤ 50, sorted by MP E_hull; each also carries `band_gap` (eV) and `is_metal` when MP has them, else `null`) |
 | `GET /api/mp/structure/{id}` | – | `{entry, cif}` |
 | `POST /api/mp/match` | `{crystal}` | `formula`, `n_searched`, `matches[]` (`entry`, `rms_displacement`) |
+| `POST /api/superconductivity/metallicity` | `crystal`, `use_mp=true` | `verdict` (`metal` / `likely_metal` / `likely_insulator` / `insulator` / `unknown`), `source` (`materials_project` / `heuristic`), `band_gap_ev`, `mp_id`, `rms_displacement`, `reason`. With an MP key: the GGA/GGA+U gap of the best `StructureMatcher` match (`metal` / `insulator`; GGA underestimates gaps). Without a key, on an MP error or with no match it falls back to a composition heuristic (`likely_*`) and is still a 200; `reason` says why |
 | `POST /api/compare` | `{crystal_a, crystal_b}` | `same_composition`, `structures_match`, rms / max displacement, both space groups, `group_subgroup`, volume per atom and change (%), energy difference (meV/atom, meV/f.u.), `method`. The energies are those carried by the payloads (same model assumed) |
 | `POST /api/ordering` | `cif` (disordered), `max_atoms=64`, `n_candidates=8`, `model_id?`, `dispersion` | ordered `candidates[]` (`cif`, energy, relative energy), `n_enumerated`, `method` |
 
@@ -286,6 +287,7 @@ Atom order, energies, forces and bonds do not matter. It is unique per project, 
 | `hull` | the `POST /api/hull/evaluate` response (`HullEvaluateResponse`, including `phase_diagram`) | `e_hull_ev`, `formation_energy_ev` (formation_energy_per_atom) |
 | `md` | `MD_COMPLETE` | `temperature_k` (mean_temperature_k), plus `diffusion_<El>_cm2_s` per element of `diffusion_coefficients_cm2_s` (e.g. `diffusion_Li_cm2_s`) |
 | `diffraction` | the `POST /api/diffraction` response | `n_peaks`, `strongest_peak_two_theta` |
+| `superconductivity` | `{descriptors, metallicity, flags[], dos_mesh, imaginary_fraction}`: `descriptors` is the `eph_proxy` object of `PHONON_DOS_DATA`, `metallicity` the `POST /api/superconductivity/metallicity` response | `omega_log_k`, `omega_2_k`, `tc_ref_k` (assumed-λ ranking scale, not a prediction), `light_element_fraction`, `metallicity` (the verdict), `sc_flags` (comma-joined flags, `""` if none), `sc_gate_pass` (`reliable` and the verdict is not `insulator` / `likely_insulator`) |
 
 Numeric summary values are `null` when not finite or missing.
 
@@ -361,6 +363,7 @@ The queue runs calculations in the background and writes their results into the 
 | `eos` | `COMPUTE_BULK_MODULUS` fields: `strain_window=0.02`, `n_points=5` | `eos` result |
 | `hull` | `relax=true` (as `POST /api/hull/evaluate`) | `hull` result. Needs `MP_API_KEY` or cached references, else the step fails (`HULL_UNAVAILABLE: …`) |
 | `follow` | `amplitude=0.1`, `fmax=0.005`, `max_steps=300` | see below |
+| `superconductivity` | `mesh=null` (automatic DOS mesh) or `[i, j, k]`, `use_mp=true` | a `superconductivity` result on the input (see below) |
 
 How `follow` works:
 - It must come after a `phonons` step with no `relax` / `follow` in between; otherwise `POST` answers 422.
@@ -369,6 +372,12 @@ How `follow` works:
 - If the phonons are dynamically stable, the step is `skipped` when `only_if_unstable` is true, else `failed` (`MODE_NOT_IMAGINARY: …`).
 
 `only_if_unstable` on any other kind is a 422.
+
+How `superconductivity` works (Tier 0 pre-screen; proxies at an assumed λ, no electrons):
+- Like `follow`, it must come after a `phonons` step with no `relax` / `follow` in between (else 422). It does not use up the phonons, so `phonons → superconductivity → follow` is valid.
+- It reuses the chain's phonon analysis (or reruns the last phonons settings), computes the DOS on `mesh` and takes its `eph_proxy`, then runs the metallicity gate with the server's MP key. MP errors never fail the step; the gate falls back to the composition heuristic.
+- `flags`: `light_elements` (light-element fraction ≥ 0.05), `high_omega_log` (ω_log ≥ 400 K), `soft_mode` (stable phonons, but at a labelled high-symmetry q-point other than Γ the lowest branch is below 0.1 · ω_max), `unstable` (descriptors not reliable), `insulating` (verdict `insulator` / `likely_insulator`).
+- The job message reads like `ω_log 312 K · T_c,ref 21.9 K · metal (MP)`.
 
 `Job`:
 

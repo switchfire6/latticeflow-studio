@@ -137,9 +137,9 @@ CONNECT_SPEC = _spec(*_COMMIT)
 
 # ---- project library + job queue (REST, docs/protocol.md §6-§7) -----------------
 #: ``ResultCreate.kind`` / ``ResultRow.kind``
-RESULT_KINDS = ("relax", "phonons", "elastic", "eos", "hull", "md", "diffraction")
+RESULT_KINDS = ("relax", "phonons", "elastic", "eos", "hull", "md", "diffraction", "superconductivity")
 #: ``JobStep.kind``
-JOB_STEP_KINDS = ("relax", "phonons", "elastic", "eos", "hull", "follow")
+JOB_STEP_KINDS = ("relax", "phonons", "elastic", "eos", "hull", "follow", "superconductivity")
 JOB_STATUSES = ("queued", "running", "done", "failed", "cancelled", "skipped")
 #: a job in one of these statuses will not change any more
 JOB_FINISHED = frozenset({"done", "failed", "cancelled", "skipped"})

@@ -414,6 +414,29 @@ class ThermalProperties(BaseModel):
     zero_point_energy_ev_per_atom: float
 
 
+class TcGridPoint(BaseModel):
+    """One Allen–Dynes T_c at an *assumed* λ and μ* (docs/design/SUPERCONDUCTIVITY_TIER0.md)."""
+
+    lam: float
+    mu_star: float
+    tc_k: float
+
+
+class EphProxyDescriptors(BaseModel):
+    """Superconductivity Tier 0 proxies from the phonon DOS (α²F ∝ F(ω); λ is assumed, not computed)."""
+
+    omega_log_k: Optional[float]
+    omega_2_k: Optional[float]
+    omega_mean_k: Optional[float]
+    omega_max_k: Optional[float]
+    light_element_fraction: float            # share of ∫F dω carried by H, Li, Be, B, C, N
+    tc_grid: List[TcGridPoint]               # LAMBDA_GRID × MU_STAR_GRID, λ-major (empty without frequencies)
+    tc_ref_k: Optional[float]                # T_c at λ = 1.0, μ* = 0.10: a ranking scale; None when not reliable
+    reliable: bool
+    warnings: List[str]
+    method: str
+
+
 class PhononDosData(BaseModel):
     mesh: List[int]
     frequencies_thz: List[float]             # DOS grid (signed THz)
@@ -421,6 +444,8 @@ class PhononDosData(BaseModel):
     projected_dos: Dict[str, List[float]]    # element symbol -> states / THz / cell (sums to total_dos)
     thermal: ThermalProperties
     imaginary_fraction: float                # fraction of mesh modes with f < -F_TOL_THZ (excluded from thermal)
+    # ---- superconductivity Tier 0 (additive): None when the descriptors could not be computed
+    eph_proxy: Optional[EphProxyDescriptors] = None
 
 
 class HistoryState(BaseModel):

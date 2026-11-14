@@ -6,8 +6,8 @@ from pydantic import BaseModel, Field
 
 from app.schemas.crystal import CrystalStatePayload
 
-ResultKind = Literal["relax", "phonons", "elastic", "eos", "hull", "md", "diffraction"]
-StepKind = Literal["relax", "phonons", "elastic", "eos", "hull", "follow"]
+ResultKind = Literal["relax", "phonons", "elastic", "eos", "hull", "md", "diffraction", "superconductivity"]
+StepKind = Literal["relax", "phonons", "elastic", "eos", "hull", "follow", "superconductivity"]
 JobStatus = Literal["queued", "running", "done", "failed", "cancelled", "skipped"]
 
 

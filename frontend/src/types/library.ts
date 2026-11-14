@@ -4,8 +4,8 @@
  */
 import type { CrystalStatePayload } from "./protocol";
 
-export type ResultKind = "relax" | "phonons" | "elastic" | "eos" | "hull" | "md" | "diffraction";
-export type StepKind = "relax" | "phonons" | "elastic" | "eos" | "hull" | "follow";
+export type ResultKind = "relax" | "phonons" | "elastic" | "eos" | "hull" | "md" | "diffraction" | "superconductivity";
+export type StepKind = "relax" | "phonons" | "elastic" | "eos" | "hull" | "follow" | "superconductivity";
 export type JobStatus = "queued" | "running" | "done" | "failed" | "cancelled" | "skipped";
 export const FINISHED_STATUSES: readonly JobStatus[] = ["done", "failed", "cancelled", "skipped"];
 

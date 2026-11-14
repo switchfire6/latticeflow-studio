@@ -21,7 +21,7 @@ from app.api.routes import ApiError, _payload_atoms
 from app.config import DEFAULT_MAX_IMPORT_MB, get_settings
 from app.core import jobs as jobs_core
 from app.core import library as lib_core
-from app.schemas.api import DiffractionResponse, HullEvaluateResponse
+from app.schemas.api import DiffractionResponse, HullEvaluateResponse, SuperconductivityResult
 from app.schemas.library import (
     ClearFinishedResponse,
     Job,
@@ -58,6 +58,7 @@ RESULT_DATA_MODELS: Dict[str, type] = {
     "hull": HullEvaluateResponse,
     "md": MDComplete,
     "diffraction": DiffractionResponse,
+    "superconductivity": SuperconductivityResult,
 }
 
 

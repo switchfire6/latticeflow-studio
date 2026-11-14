@@ -164,3 +164,14 @@ def test_library_and_job_queue(studio, tmp_path):
     with pytest.raises(StudioError) as err:
         studio.cancel_job(jobs[0]["id"])
     assert err.value.code == "INVALID_OPERATION" and err.value.status == 409
+
+
+def test_superconductivity_metallicity_and_sort(studio):
+    from latticeflow_client.screen import sort_sc_rows
+
+    studio.load(preset="srtio3")
+    gate = studio.metallicity()      # no MP key on the test server: composition heuristic
+    assert gate["verdict"] == "likely_insulator" and gate["source"] == "heuristic"
+    rows = [{"id": 1, "sc_gate_pass": False, "tc_ref_k": 30.0}, {"id": 2, "sc_gate_pass": True, "tc_ref_k": None},
+            {"id": 3, "sc_gate_pass": True, "tc_ref_k": 12.0}, {"id": 4, "sc_gate_pass": True, "tc_ref_k": 20.0}]
+    assert [r["id"] for r in sort_sc_rows(rows)] == [4, 3, 2, 1]

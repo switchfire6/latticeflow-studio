@@ -314,6 +314,32 @@ export interface PhononDosData {
   projected_dos: Record<string, number[]>; // by element
   thermal: ThermalProperties;
   imaginary_fraction: number;
+  /** Superconductivity Tier 0 proxies; absent on older backends or when their computation failed. */
+  eph_proxy?: EphProxyDescriptors | null;
+}
+
+/** One Allen–Dynes T_c at an assumed λ and μ* (K). */
+export interface TcGridPoint {
+  lam: number;
+  mu_star: number;
+  tc_k: number;
+}
+
+/**
+ * Constant-coupling proxy (α²F ∝ F) phonon scales from the DOS (SUPERCONDUCTIVITY_TIER0.md).
+ * `tc_ref_k` (λ = 1.0, μ* = 0.10) is a ranking scale, not a prediction.
+ */
+export interface EphProxyDescriptors {
+  omega_log_k: number | null;
+  omega_2_k: number | null;
+  omega_mean_k: number | null;
+  omega_max_k: number | null;
+  light_element_fraction: number;
+  tc_grid: TcGridPoint[]; // LAMBDA_GRID × MU_STAR_GRID, λ-major
+  tc_ref_k: number | null; // null when not reliable
+  reliable: boolean;
+  warnings: string[];
+  method: string;
 }
 
 export interface HistoryState {
@@ -603,6 +629,8 @@ export interface MPEntry {
   energy_above_hull: number | null;
   is_stable: boolean | null;
   theoretical: boolean | null;
+  band_gap?: number | null;
+  is_metal?: boolean | null;
 }
 /** GET /api/mp/search?q=… */
 export interface MPSearchResponse {
@@ -875,6 +903,21 @@ export interface MPMatchResponse {
   formula: string;
   n_searched: number;
   matches: MPMatch[];
+}
+
+// REST: POST /api/superconductivity/metallicity
+export type MetallicityVerdict = "metal" | "likely_metal" | "likely_insulator" | "insulator" | "unknown";
+export interface MetallicityRequest {
+  crystal: CrystalStatePayload;
+  use_mp?: boolean; // default true
+}
+export interface MetallicityResponse {
+  verdict: MetallicityVerdict;
+  source: "materials_project" | "heuristic";
+  band_gap_ev: number | null; // MP (GGA/GGA+U) gap of the best match
+  mp_id: string | null;
+  rms_displacement: number | null;
+  reason: string;
 }
 
 // Phase D

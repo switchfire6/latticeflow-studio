@@ -100,6 +100,7 @@ Phase B (IMPROVEMENT_SUGGESTIONS.md §5.2-5.3, §4.2)
 from __future__ import annotations
 
 import asyncio
+import logging
 import threading
 import warnings
 from dataclasses import dataclass
@@ -992,6 +993,12 @@ class PhononAnalysis:
             ),
             imaginary_fraction=imaginary_fraction,
         )
+        try:  # superconductivity Tier 0 proxies; a failure never breaks the DOS
+            from app.core.superconductivity import descriptors_from_dos
+
+            result.eph_proxy = descriptors_from_dos(result)
+        except Exception:  # noqa: BLE001
+            logging.getLogger("latticeflow.phonons").exception("superconductivity proxy descriptors failed")
         self._dos_cache = (key, result)
         return result
 
